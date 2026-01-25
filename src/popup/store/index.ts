@@ -8,6 +8,7 @@ import type {
   IdentityInfo,
   TokenBalance,
   PendingTransaction,
+  NametagInfo,
 } from '@/shared/types';
 
 export type View =
@@ -20,7 +21,8 @@ export type View =
   | 'receive'
   | 'identities'
   | 'settings'
-  | 'pending-transactions';
+  | 'pending-transactions'
+  | 'register-nametag';
 
 interface PopupState {
   // Wallet state
@@ -29,6 +31,9 @@ interface PopupState {
   identities: IdentityInfo[];
   balances: TokenBalance[];
   pendingTransactions: PendingTransaction[];
+
+  // Nametag state
+  myNametag: NametagInfo | null;
 
   // UI state
   view: View;
@@ -41,6 +46,7 @@ interface PopupState {
   setIdentities: (identities: IdentityInfo[]) => void;
   setBalances: (balances: TokenBalance[]) => void;
   setPendingTransactions: (transactions: PendingTransaction[]) => void;
+  setMyNametag: (nametag: NametagInfo | null) => void;
   setView: (view: View) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -53,6 +59,7 @@ const initialState = {
   identities: [],
   balances: [],
   pendingTransactions: [],
+  myNametag: null,
   view: 'loading' as View,
   loading: true,
   error: null,
@@ -66,6 +73,7 @@ export const useStore = create<PopupState>((set) => ({
   setIdentities: (identities) => set({ identities }),
   setBalances: (balances) => set({ balances }),
   setPendingTransactions: (pendingTransactions) => set({ pendingTransactions }),
+  setMyNametag: (myNametag) => set({ myNametag }),
   setView: (view) => set({ view }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),

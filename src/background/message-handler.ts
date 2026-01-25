@@ -9,6 +9,8 @@
  */
 
 import { walletManager } from './wallet-manager';
+import { nametagMintService } from './nametag-mint-service';
+import { nostrService } from './nostr-service';
 import {
   addPendingTransaction,
   removePendingTransaction,
@@ -23,6 +25,7 @@ import type {
   SignNostrData,
   IdentityInfo,
   TokenBalance,
+  NametagInfo,
 } from '@/shared/types';
 
 /** Connected sites (origin -> boolean) */
@@ -254,6 +257,19 @@ export async function handlePopupMessage(
         await savePreferences(preferences);
         return { success: true };
       }
+
+      case 'POPUP_CHECK_NAMETAG_AVAILABLE': {
+        const nametag = message.nametag as string;
+        return handlePopupCheckNametagAvailable(nametag);
+      }
+
+      case 'POPUP_REGISTER_NAMETAG': {
+        const nametag = message.nametag as string;
+        return handlePopupRegisterNametag(nametag);
+      }
+
+      case 'POPUP_GET_MY_NAMETAG':
+        return handlePopupGetMyNametag();
 
       default:
         return {
@@ -611,6 +627,97 @@ async function handleCheckNametagAvailable(
   }
 }
 
+// ============ Popup Nametag Handlers ============
+
+async function handlePopupCheckNametagAvailable(
+  nametag: string
+): Promise<{ success: boolean; available?: boolean; error?: string }> {
+  if (!walletManager.isUnlocked()) {
+    return { success: false, error: 'Wallet is locked' };
+  }
+
+  try {
+    const available = await nametagMintService.isAvailable(nametag);
+    return { success: true, available };
+  } catch (error) {
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to check nametag availability',
+    };
+  }
+}
+
+async function handlePopupRegisterNametag(
+  nametag: string
+): Promise<{ success: boolean; nametag?: NametagInfo; error?: string }> {
+  if (!walletManager.isUnlocked()) {
+    return { success: false, error: 'Wallet is locked' };
+  }
+
+  if (!nostrService.getIsConnected()) {
+    return { success: false, error: 'NOSTR not connected' };
+  }
+
+  try {
+    // Clean the nametag
+    const cleanTag = nametag.replace('@', '').trim().toLowerCase();
+
+    console.log(`[NametagHandler] Registering nametag: @${cleanTag}`);
+
+    // Register via the mint service (checks availability, publishes binding)
+    const result = await nametagMintService.register(cleanTag);
+
+    if (result.status === 'error') {
+      return { success: false, error: result.message };
+    }
+
+    // Save to storage
+    // Note: In Phase 5, we don't have an on-chain token, so tokenJson is empty
+    await walletManager.saveNametag({
+      name: cleanTag,
+      tokenJson: '{}', // Placeholder - on-chain minting in Phase 6+
+      proxyAddress: result.proxyAddress,
+      timestamp: Date.now(),
+    });
+
+    const nametagInfo: NametagInfo = {
+      nametag: cleanTag,
+      proxyAddress: result.proxyAddress,
+      tokenId: '', // Placeholder - on-chain minting in Phase 6+
+      status: 'active',
+    };
+
+    console.log(`[NametagHandler] Nametag registered: @${cleanTag}`);
+    return { success: true, nametag: nametagInfo };
+  } catch (error) {
+    console.error('[NametagHandler] Registration error:', error);
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to register nametag',
+    };
+  }
+}
+
+async function handlePopupGetMyNametag(): Promise<{
+  success: boolean;
+  nametag?: NametagInfo | null;
+  error?: string;
+}> {
+  if (!walletManager.isUnlocked()) {
+    return { success: false, error: 'Wallet is locked' };
+  }
+
+  try {
+    const nametag = await walletManager.getMyNametag();
+    return { success: true, nametag };
+  } catch (error) {
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to get nametag',
+    };
+  }
+}
+
 // ============ Transaction Approval/Rejection ============
 
 async function handleApproveTransaction(requestId: string): Promise<{ success: boolean; error?: string }> {
@@ -720,3 +827,4 @@ async function sendToTab(tabId: number, message: unknown): Promise<void> {
     console.error('Failed to send message to tab:', error);
   }
 }
+

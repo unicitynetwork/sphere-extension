@@ -9,6 +9,7 @@ import type {
   IdentityInfo,
   TokenBalance,
   PendingTransaction,
+  NametagInfo,
 } from '@/shared/types';
 
 /**
@@ -32,6 +33,7 @@ export function useWallet() {
     setIdentities,
     setBalances,
     setPendingTransactions,
+    setMyNametag,
     setView,
     setLoading,
     setError,
@@ -391,6 +393,62 @@ export function useWallet() {
     return response;
   }, []);
 
+  // ============ Nametag Operations ============
+
+  /**
+   * Check if a nametag is available for registration.
+   */
+  const checkNametagAvailable = useCallback(async (nametag: string): Promise<boolean> => {
+    const { available } = await sendMessage<{ available: boolean }>({
+      type: 'POPUP_CHECK_NAMETAG_AVAILABLE',
+      nametag,
+    });
+    return available;
+  }, []);
+
+  /**
+   * Register a nametag.
+   */
+  const registerNametag = useCallback(
+    async (nametag: string): Promise<NametagInfo> => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await sendMessage<{ nametag: NametagInfo }>({
+          type: 'POPUP_REGISTER_NAMETAG',
+          nametag,
+        });
+
+        setMyNametag(response.nametag);
+        return response.nametag;
+      } catch (error) {
+        console.error('Register nametag error:', error);
+        setError((error as Error).message);
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [setLoading, setError, setMyNametag]
+  );
+
+  /**
+   * Get user's registered nametag.
+   */
+  const getMyNametag = useCallback(async (): Promise<NametagInfo | null> => {
+    try {
+      const { nametag } = await sendMessage<{ nametag: NametagInfo | null }>({
+        type: 'POPUP_GET_MY_NAMETAG',
+      });
+      setMyNametag(nametag);
+      return nametag;
+    } catch (error) {
+      console.error('Get nametag error:', error);
+      return null;
+    }
+  }, [setMyNametag]);
+
   return {
     initialize,
     loadWalletData,
@@ -405,5 +463,9 @@ export function useWallet() {
     approveTransaction,
     rejectTransaction,
     getNostrPublicKey,
+    // Nametag operations
+    checkNametagAvailable,
+    registerNametag,
+    getMyNametag,
   };
 }

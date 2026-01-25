@@ -11,6 +11,7 @@ import { UnlockWallet } from './components/UnlockWallet';
 import { Dashboard } from './components/Dashboard';
 import { Send } from './components/Send';
 import { Receive } from './components/Receive';
+import { RegisterNametag } from './components/RegisterNametag';
 import { Settings } from './components/Settings';
 import { PendingTransactions } from './components/PendingTransactions';
 
@@ -63,6 +64,7 @@ export default function App() {
         {view === 'dashboard' && <Dashboard />}
         {view === 'send' && <Send />}
         {view === 'receive' && <Receive />}
+        {view === 'register-nametag' && <RegisterNametag />}
         {view === 'settings' && <Settings />}
         {view === 'pending-transactions' && <PendingTransactions />}
       </main>

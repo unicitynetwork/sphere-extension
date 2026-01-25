@@ -183,7 +183,10 @@ export type PopupMessageType =
   | 'POPUP_APPROVE_TRANSACTION'
   | 'POPUP_REJECT_TRANSACTION'
   | 'POPUP_GET_NOSTR_PUBLIC_KEY'
-  | 'POPUP_GET_ADDRESS';
+  | 'POPUP_GET_ADDRESS'
+  | 'POPUP_CHECK_NAMETAG_AVAILABLE'
+  | 'POPUP_REGISTER_NAMETAG'
+  | 'POPUP_GET_MY_NAMETAG';
 
 // ============ Request/Response Types ============
 
@@ -393,6 +396,45 @@ export interface GetMyNametagsRequest extends BaseRequest {
 export interface GetMyNametagsResponse extends BaseResponse {
   type: 'SPHERE_GET_MY_NAMETAGS_RESPONSE';
   nametags?: NametagInfo[];
+}
+
+// ============ Popup Nametag Types ============
+
+// Check Nametag Available (Popup)
+export interface PopupCheckNametagAvailableRequest {
+  type: 'POPUP_CHECK_NAMETAG_AVAILABLE';
+  nametag: string;
+}
+
+export interface PopupCheckNametagAvailableResponse extends BaseResponse {
+  available?: boolean;
+}
+
+// Register Nametag (Popup)
+export interface PopupRegisterNametagRequest {
+  type: 'POPUP_REGISTER_NAMETAG';
+  nametag: string;
+}
+
+export interface PopupRegisterNametagResponse extends BaseResponse {
+  nametag?: NametagInfo;
+}
+
+// Get My Nametag (Popup)
+export interface PopupGetMyNametagRequest {
+  type: 'POPUP_GET_MY_NAMETAG';
+}
+
+export interface PopupGetMyNametagResponse extends BaseResponse {
+  nametag?: NametagInfo | null;
+}
+
+// Stored nametag in chrome.storage
+export interface StoredNametag {
+  name: string;
+  tokenJson: string;
+  proxyAddress: string;
+  timestamp: number;
 }
 
 // ============ Union Types ============

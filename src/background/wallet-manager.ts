@@ -12,10 +12,11 @@
 import { Wallet, Identity, AlphaClient } from '@jvsteiner/alphalite';
 import type { IWalletJson } from '@jvsteiner/alphalite';
 import { ProxyAddress } from '@unicitylabs/state-transition-sdk/lib/address/ProxyAddress';
-import type { IdentityInfo, TokenBalance, WalletState, SendTokensResult, NametagResolution } from '@/shared/types';
+import type { IdentityInfo, TokenBalance, WalletState, SendTokensResult, NametagResolution, StoredNametag, NametagInfo } from '@/shared/types';
 import { COIN_SYMBOLS, ALPHA_COIN_ID, GATEWAY_URL } from '@/shared/constants';
 import { deriveNostrKeyPair, signNostrEvent, signMessage } from './nostr-keys';
 import { nostrService } from './nostr-service';
+import { TokenTransferService } from './token-transfer-service';
 
 /**
  * In-memory wallet state (cleared on lock or extension restart)
@@ -510,10 +511,50 @@ export class WalletManager {
     };
   }
 
+  // ============ Nametag Storage ============
+
+  /**
+   * Get stored nametag from chrome.storage.
+   */
+  async getStoredNametag(): Promise<StoredNametag | null> {
+    const result = await chrome.storage.local.get(['nametag']);
+    return result.nametag || null;
+  }
+
+  /**
+   * Save nametag to chrome.storage.
+   */
+  async saveNametag(nametag: StoredNametag): Promise<void> {
+    await chrome.storage.local.set({ nametag });
+  }
+
+  /**
+   * Delete nametag from chrome.storage.
+   */
+  async deleteNametag(): Promise<void> {
+    await chrome.storage.local.remove(['nametag']);
+  }
+
+  /**
+   * Get nametag info for UI display.
+   */
+  async getMyNametag(): Promise<NametagInfo | null> {
+    const stored = await this.getStoredNametag();
+    if (!stored) return null;
+
+    return {
+      nametag: stored.name,
+      proxyAddress: stored.proxyAddress,
+      tokenId: '', // Token ID can be derived from the token JSON if needed
+      status: 'active',
+    };
+  }
+
   // ============ NOSTR Connection ============
 
   /**
    * Connect to NOSTR relay with the active identity's key.
+   * Sets up token transfer handler for receiving tokens via NOSTR.
    */
   private async connectNostr(): Promise<void> {
     if (!this.unlockedWallet) return;
@@ -523,10 +564,51 @@ export class WalletManager {
       const keyPair = deriveNostrKeyPair(activeIdentity);
       const privateKeyHex = this.bytesToHex(keyPair.privateKey);
       await nostrService.connect(privateKeyHex);
+
+      // Set up token transfer handler
+      this.setupTokenTransferHandler();
     } catch (error) {
       console.error('Failed to connect to NOSTR:', error);
       // Don't throw - NOSTR is not critical for basic wallet operation
     }
+  }
+
+  /**
+   * Set up handler for incoming token transfers via NOSTR.
+   */
+  private setupTokenTransferHandler(): void {
+    const tokenTransferService = new TokenTransferService({
+      onTokenReceived: async (tokenJson, transactionJson, senderPubkey) => {
+        console.log(`[WalletManager] Receiving token from ${senderPubkey.slice(0, 8)}...`);
+        try {
+          // Use the existing receiveAmount flow
+          // The payload format from NOSTR is: { sourceToken, transferTx }
+          // We need to construct the payload that receiveAmount expects
+          const payload = JSON.stringify({
+            token: JSON.parse(tokenJson),
+            transaction: JSON.parse(transactionJson),
+          });
+
+          const tokenIds = await this.receiveAmount(payload);
+          console.log(`[WalletManager] Received ${tokenIds.length} token(s)`);
+          return tokenIds.length > 0;
+        } catch (error) {
+          console.error('[WalletManager] Token receive failed:', error);
+          return false;
+        }
+      },
+
+      getStoredNametag: async () => {
+        return this.getStoredNametag();
+      },
+    });
+
+    // Register the handler with nostrService
+    nostrService.onTokenTransfer(async (transfer) => {
+      return tokenTransferService.processTransfer(transfer);
+    });
+
+    console.log('[WalletManager] Token transfer handler configured');
   }
 
   // ============ Helpers ============
