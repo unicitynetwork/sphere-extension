@@ -10,6 +10,7 @@ import type {
   TokenBalance,
   PendingTransaction,
   NametagInfo,
+  AggregatorConfig,
 } from '@/shared/types';
 
 /**
@@ -47,30 +48,25 @@ export function useWallet() {
       setLoading(true);
       setError(null);
 
-      // Get wallet state
       const { state } = await sendMessage<{ state: WalletState }>({
         type: 'POPUP_GET_STATE',
       });
 
       setWalletState(state);
 
-      // Check for pending transactions first
       const { transactions } = await sendMessage<{ transactions: PendingTransaction[] }>({
         type: 'POPUP_GET_PENDING_TRANSACTIONS',
       });
 
       setPendingTransactions(transactions);
 
-      // Navigate to appropriate view
       if (!state.hasWallet) {
         setView('create-wallet');
       } else if (!state.isUnlocked) {
         setView('unlock');
       } else if (transactions.length > 0) {
-        // If there are pending transactions, show them
         setView('pending-transactions');
       } else {
-        // Load identity and balances, then show dashboard
         await loadWalletData();
         setView('dashboard');
       }
@@ -84,11 +80,10 @@ export function useWallet() {
   }, [setLoading, setError, setWalletState, setPendingTransactions, setView]);
 
   /**
-   * Load wallet data (identities and balances).
+   * Load wallet data (identity and balances).
    */
   const loadWalletData = useCallback(async () => {
     try {
-      // Get identities
       const { identities, activeIdentityId } = await sendMessage<{
         identities: IdentityInfo[];
         activeIdentityId: string;
@@ -101,7 +96,6 @@ export function useWallet() {
       const activeIdentity = identities.find((i) => i.id === activeIdentityId) || null;
       setActiveIdentity(activeIdentity);
 
-      // Get balances
       const { balances } = await sendMessage<{ balances: TokenBalance[] }>({
         type: 'POPUP_GET_BALANCES',
       });
@@ -114,22 +108,21 @@ export function useWallet() {
   }, [setIdentities, setActiveIdentity, setBalances]);
 
   /**
-   * Create a new wallet.
+   * Create a new wallet. Returns the mnemonic for user backup.
    */
   const createWallet = useCallback(
-    async (password: string, walletName?: string, identityLabel?: string) => {
+    async (password: string): Promise<string> => {
       try {
         setLoading(true);
         setError(null);
 
-        const { identity, state } = await sendMessage<{
+        const { identity, mnemonic, state } = await sendMessage<{
           identity: IdentityInfo;
+          mnemonic: string;
           state: WalletState;
         }>({
           type: 'POPUP_CREATE_WALLET',
           password,
-          walletName,
-          identityLabel,
         });
 
         setWalletState(state);
@@ -137,7 +130,7 @@ export function useWallet() {
         setIdentities([identity]);
 
         await loadWalletData();
-        setView('dashboard');
+        return mnemonic;
       } catch (error) {
         console.error('Create wallet error:', error);
         setError((error as Error).message);
@@ -146,14 +139,14 @@ export function useWallet() {
         setLoading(false);
       }
     },
-    [setLoading, setError, setWalletState, setActiveIdentity, setIdentities, loadWalletData, setView]
+    [setLoading, setError, setWalletState, setActiveIdentity, setIdentities, loadWalletData]
   );
 
   /**
-   * Import a wallet from JSON.
+   * Import a wallet from mnemonic.
    */
   const importWallet = useCallback(
-    async (walletJson: string, password: string) => {
+    async (mnemonic: string, password: string) => {
       try {
         setLoading(true);
         setError(null);
@@ -163,7 +156,7 @@ export function useWallet() {
           state: WalletState;
         }>({
           type: 'POPUP_IMPORT_WALLET',
-          walletJson,
+          mnemonic,
           password,
         });
 
@@ -241,56 +234,29 @@ export function useWallet() {
   }, [setLoading, setWalletState, setActiveIdentity, setIdentities, setBalances, setView, setError]);
 
   /**
-   * Create a new identity.
+   * Reset wallet - clear all data and return to create wallet screen.
    */
-  const createIdentity = useCallback(
-    async (label: string) => {
-      try {
-        setLoading(true);
+  const resetWallet = useCallback(async () => {
+    try {
+      setLoading(true);
 
-        const { identity } = await sendMessage<{ identity: IdentityInfo }>({
-          type: 'POPUP_CREATE_IDENTITY',
-          label,
-        });
+      const { state } = await sendMessage<{ state: WalletState }>({
+        type: 'POPUP_RESET_WALLET',
+      });
 
-        await loadWalletData();
-        return identity;
-      } catch (error) {
-        console.error('Create identity error:', error);
-        setError((error as Error).message);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [setLoading, setError, loadWalletData]
-  );
-
-  /**
-   * Switch active identity.
-   */
-  const switchIdentity = useCallback(
-    async (identityId: string) => {
-      try {
-        setLoading(true);
-
-        const { identity } = await sendMessage<{ identity: IdentityInfo }>({
-          type: 'POPUP_SWITCH_IDENTITY',
-          identityId,
-        });
-
-        setActiveIdentity(identity);
-        await loadWalletData();
-      } catch (error) {
-        console.error('Switch identity error:', error);
-        setError((error as Error).message);
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [setLoading, setError, setActiveIdentity, loadWalletData]
-  );
+      setWalletState(state);
+      setActiveIdentity(null);
+      setIdentities([]);
+      setBalances([]);
+      setMyNametag(null);
+      setView('create-wallet');
+    } catch (error) {
+      console.error('Reset wallet error:', error);
+      setError((error as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [setLoading, setWalletState, setActiveIdentity, setIdentities, setBalances, setMyNametag, setView, setError]);
 
   /**
    * Export wallet as JSON.
@@ -300,6 +266,16 @@ export function useWallet() {
       type: 'POPUP_EXPORT_WALLET',
     });
     return walletJson;
+  }, []);
+
+  /**
+   * Get mnemonic for backup display.
+   */
+  const getMnemonic = useCallback(async (): Promise<string | null> => {
+    const { mnemonic } = await sendMessage<{ mnemonic: string | null }>({
+      type: 'POPUP_GET_MNEMONIC',
+    });
+    return mnemonic;
   }, []);
 
   /**
@@ -325,14 +301,11 @@ export function useWallet() {
           requestId,
         });
 
-        // Refresh pending transactions
         const { transactions } = await sendMessage<{ transactions: PendingTransaction[] }>({
           type: 'POPUP_GET_PENDING_TRANSACTIONS',
         });
 
         setPendingTransactions(transactions);
-
-        // Refresh balances
         await loadWalletData();
 
         if (transactions.length === 0) {
@@ -362,7 +335,6 @@ export function useWallet() {
           requestId,
         });
 
-        // Refresh pending transactions
         const { transactions } = await sendMessage<{ transactions: PendingTransaction[] }>({
           type: 'POPUP_GET_PENDING_TRANSACTIONS',
         });
@@ -395,9 +367,6 @@ export function useWallet() {
 
   // ============ Nametag Operations ============
 
-  /**
-   * Check if a nametag is available for registration.
-   */
   const checkNametagAvailable = useCallback(async (nametag: string): Promise<boolean> => {
     const { available } = await sendMessage<{ available: boolean }>({
       type: 'POPUP_CHECK_NAMETAG_AVAILABLE',
@@ -406,9 +375,6 @@ export function useWallet() {
     return available;
   }, []);
 
-  /**
-   * Register a nametag.
-   */
   const registerNametag = useCallback(
     async (nametag: string): Promise<NametagInfo> => {
       try {
@@ -433,9 +399,6 @@ export function useWallet() {
     [setLoading, setError, setMyNametag]
   );
 
-  /**
-   * Get user's registered nametag.
-   */
   const getMyNametag = useCallback(async (): Promise<NametagInfo | null> => {
     try {
       const { nametag } = await sendMessage<{ nametag: NametagInfo | null }>({
@@ -449,6 +412,79 @@ export function useWallet() {
     }
   }, [setMyNametag]);
 
+  // ============ Aggregator Config ============
+
+  const getAggregatorConfig = useCallback(async (): Promise<AggregatorConfig> => {
+    try {
+      const { config } = await sendMessage<{ config: AggregatorConfig }>({
+        type: 'POPUP_GET_AGGREGATOR_CONFIG',
+      });
+      return config;
+    } catch (error) {
+      console.error('Get aggregator config error:', error);
+      return { gatewayUrl: 'https://goggregator-test.unicity.network' };
+    }
+  }, []);
+
+  const setAggregatorConfig = useCallback(
+    async (config: AggregatorConfig): Promise<void> => {
+      try {
+        setLoading(true);
+        await sendMessage({
+          type: 'POPUP_SET_AGGREGATOR_CONFIG',
+          config,
+        });
+      } catch (error) {
+        console.error('Set aggregator config error:', error);
+        setError((error as Error).message);
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [setLoading, setError]
+  );
+
+  const sendTokens = useCallback(
+    async (recipient: string, coinId: string, amount: string): Promise<string> => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await sendMessage<{ transactionId: string }>({
+          type: 'POPUP_SEND_TOKENS',
+          recipient,
+          coinId,
+          amount,
+        });
+        await loadWalletData();
+        return response.transactionId;
+      } catch (error) {
+        console.error('Send tokens error:', error);
+        setError((error as Error).message);
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [setLoading, setError, loadWalletData]
+  );
+
+  const resolveNametag = useCallback(
+    async (nametag: string): Promise<{ nametag: string; pubkey: string; proxyAddress: string } | null> => {
+      try {
+        const response = await sendMessage<{ resolution: { nametag: string; pubkey: string; proxyAddress: string } | null }>({
+          type: 'POPUP_RESOLVE_NAMETAG',
+          nametag,
+        });
+        return response.resolution;
+      } catch (error) {
+        console.error('Resolve nametag error:', error);
+        return null;
+      }
+    },
+    []
+  );
+
   return {
     initialize,
     loadWalletData,
@@ -456,9 +492,9 @@ export function useWallet() {
     importWallet,
     unlockWallet,
     lockWallet,
-    createIdentity,
-    switchIdentity,
+    resetWallet,
     exportWallet,
+    getMnemonic,
     getAddress,
     approveTransaction,
     rejectTransaction,
@@ -467,5 +503,11 @@ export function useWallet() {
     checkNametagAvailable,
     registerNametag,
     getMyNametag,
+    resolveNametag,
+    // Send operations
+    sendTokens,
+    // Aggregator config
+    getAggregatorConfig,
+    setAggregatorConfig,
   };
 }

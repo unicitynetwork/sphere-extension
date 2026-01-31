@@ -5,6 +5,7 @@
 import { useStore } from '../store';
 import { useWallet } from '../hooks/useWallet';
 import type { PendingTransaction, SendTransactionData, SignMessageData, SignNostrData } from '@/shared/types';
+import { formatTokenAmount, ALPHA_COIN_ID } from '@/shared/constants';
 
 export function PendingTransactions() {
   const { pendingTransactions, loading, setView } = useStore();
@@ -90,7 +91,9 @@ function TransactionCard({ transaction }: { transaction: PendingTransaction }) {
 
 function SendDetails({ data }: { data: SendTransactionData }) {
   const formatAmount = (amount: string): string => {
-    const num = parseFloat(amount);
+    // Format from smallest units to human-readable
+    const formatted = formatTokenAmount(amount, data.coinId || ALPHA_COIN_ID);
+    const num = parseFloat(formatted);
     return num.toLocaleString(undefined, { maximumFractionDigits: 8 });
   };
 
@@ -104,7 +107,7 @@ function SendDetails({ data }: { data: SendTransactionData }) {
       <div className="text-center">
         <div className="text-sm text-gray-400">Send</div>
         <div className="text-2xl font-bold text-white">
-          {formatAmount(data.amount)} ALPHA
+          {formatAmount(data.amount)} UCT
         </div>
       </div>
 

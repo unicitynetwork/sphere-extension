@@ -7,13 +7,17 @@ import { useStore } from '../store';
 import { useWallet } from '../hooks/useWallet';
 
 type MintStatus = 'idle' | 'checking' | 'minting' | 'publishing' | 'success' | 'error';
+type AvailabilityStatus = 'unknown' | 'checking' | 'available' | 'taken' | 'check-failed';
 
 export function RegisterNametag() {
   const [nametag, setNametag] = useState('');
-  const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
-  const [isChecking, setIsChecking] = useState(false);
+  const [availabilityStatus, setAvailabilityStatus] = useState<AvailabilityStatus>('unknown');
   const [mintStatus, setMintStatus] = useState<MintStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  // Legacy compatibility
+  const isAvailable = availabilityStatus === 'available' || availabilityStatus === 'check-failed';
+  const isChecking = availabilityStatus === 'checking';
 
   const { checkNametagAvailable, registerNametag } = useWallet();
   const { setView, loading } = useStore();
@@ -29,27 +33,25 @@ export function RegisterNametag() {
     const cleanTag = nametag.toLowerCase().trim();
 
     if (cleanTag.length < 3) {
-      setIsAvailable(null);
+      setAvailabilityStatus('unknown');
       return;
     }
 
     if (!isValidFormat(cleanTag)) {
-      setIsAvailable(null);
+      setAvailabilityStatus('unknown');
       return;
     }
 
-    setIsChecking(true);
-    setIsAvailable(null);
+    setAvailabilityStatus('checking');
 
     const timer = setTimeout(async () => {
       try {
         const available = await checkNametagAvailable(cleanTag);
-        setIsAvailable(available);
+        setAvailabilityStatus(available ? 'available' : 'taken');
       } catch (err) {
         console.error('Check availability error:', err);
-        setIsAvailable(null);
-      } finally {
-        setIsChecking(false);
+        // Allow registration even when check fails (NOSTR may be down)
+        setAvailabilityStatus('check-failed');
       }
     }, 500);
 
@@ -140,14 +142,19 @@ export function RegisterNametag() {
             {isChecking && (
               <div className="w-5 h-5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
             )}
-            {!isChecking && isAvailable === true && (
+            {availabilityStatus === 'available' && (
               <svg className="w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             )}
-            {!isChecking && isAvailable === false && (
+            {availabilityStatus === 'taken' && (
               <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            {availabilityStatus === 'check-failed' && (
+              <svg className="w-6 h-6 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             )}
           </div>
@@ -158,11 +165,14 @@ export function RegisterNametag() {
           {nametag.length > 0 && nametag.length < 3 && (
             <p className="text-xs text-yellow-500">Must be at least 3 characters</p>
           )}
-          {!isChecking && isAvailable === false && (
+          {availabilityStatus === 'taken' && (
             <p className="text-xs text-red-400">This nametag is already taken</p>
           )}
-          {!isChecking && isAvailable === true && (
+          {availabilityStatus === 'available' && (
             <p className="text-xs text-green-400">Available!</p>
+          )}
+          {availabilityStatus === 'check-failed' && (
+            <p className="text-xs text-yellow-400">Could not verify availability - proceed with caution</p>
           )}
         </div>
       </div>

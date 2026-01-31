@@ -2,18 +2,42 @@
  * Settings view - manage identities, export wallet, etc.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { useWallet } from '../hooks/useWallet';
+import { GATEWAY_URL } from '@/shared/constants';
 
 export function Settings() {
-  const { activeIdentity, identities, setView } = useStore();
-  const { lockWallet, switchIdentity, createIdentity, exportWallet, getNostrPublicKey } = useWallet();
+  const { activeIdentity, setView } = useStore();
+  const {
+    lockWallet,
+    resetWallet,
+    exportWallet,
+    getMnemonic,
+    getNostrPublicKey,
+    getAggregatorConfig,
+    setAggregatorConfig,
+  } = useWallet();
   const [showExport, setShowExport] = useState(false);
   const [walletJson, setWalletJson] = useState('');
-  const [showNewIdentity, setShowNewIdentity] = useState(false);
-  const [newIdentityLabel, setNewIdentityLabel] = useState('');
+  const [showMnemonic, setShowMnemonic] = useState(false);
+  const [mnemonic, setMnemonic] = useState<string | null>(null);
   const [nostrKey, setNostrKey] = useState<{ hex: string; npub: string } | null>(null);
+
+  // Aggregator config state
+  const [showNetworkConfig, setShowNetworkConfig] = useState(false);
+  const [gatewayUrl, setGatewayUrl] = useState(GATEWAY_URL);
+  const [apiKey, setApiKey] = useState('');
+  const [networkSaving, setNetworkSaving] = useState(false);
+  const [networkSaved, setNetworkSaved] = useState(false);
+
+  // Load aggregator config on mount
+  useEffect(() => {
+    getAggregatorConfig().then((config) => {
+      setGatewayUrl(config.gatewayUrl);
+      setApiKey(config.apiKey || '');
+    });
+  }, [getAggregatorConfig]);
 
   const handleExport = async () => {
     const json = await exportWallet();
@@ -21,11 +45,10 @@ export function Settings() {
     setShowExport(true);
   };
 
-  const handleCreateIdentity = async () => {
-    if (!newIdentityLabel.trim()) return;
-    await createIdentity(newIdentityLabel);
-    setNewIdentityLabel('');
-    setShowNewIdentity(false);
+  const handleShowMnemonic = async () => {
+    const m = await getMnemonic();
+    setMnemonic(m);
+    setShowMnemonic(true);
   };
 
   const handleShowNostr = async () => {
@@ -43,6 +66,22 @@ export function Settings() {
     URL.revokeObjectURL(url);
   };
 
+  const handleSaveNetwork = async () => {
+    setNetworkSaving(true);
+    try {
+      await setAggregatorConfig({
+        gatewayUrl: gatewayUrl.trim() || GATEWAY_URL,
+        apiKey: apiKey.trim() || undefined,
+      });
+      setNetworkSaved(true);
+      setTimeout(() => setNetworkSaved(false), 2000);
+    } catch (error) {
+      console.error('Failed to save network config:', error);
+    } finally {
+      setNetworkSaving(false);
+    }
+  };
+
   return (
     <div className="p-4">
       {/* Header */}
@@ -58,60 +97,111 @@ export function Settings() {
         <h2 className="text-xl font-semibold">Settings</h2>
       </div>
 
-      {/* Identities Section */}
+      {/* Wallet Address */}
+      {activeIdentity && (
+        <div className="mb-6">
+          <h3 className="text-sm text-gray-400 mb-3">Wallet</h3>
+          <div className="bg-gray-800 rounded-lg p-3">
+            <div className="font-medium">{activeIdentity.label}</div>
+            <div className="text-xs text-gray-500 font-mono mt-1">
+              {activeIdentity.publicKey.slice(0, 16)}...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mnemonic Backup */}
+      <div className="mb-6">
+        <h3 className="text-sm text-gray-400 mb-3">Recovery Phrase</h3>
+        {showMnemonic && mnemonic ? (
+          <div className="space-y-3">
+            <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-3">
+              <p className="text-xs text-yellow-400 mb-2">
+                Write down these words and store them safely. Anyone with this phrase can access your wallet.
+              </p>
+              <div className="bg-gray-900 rounded p-3 font-mono text-sm text-gray-200 break-all">
+                {mnemonic}
+              </div>
+            </div>
+            <button
+              onClick={() => { setShowMnemonic(false); setMnemonic(null); }}
+              className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg
+                         text-sm transition-colors"
+            >
+              Hide Recovery Phrase
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={handleShowMnemonic}
+            className="w-full bg-gray-800 hover:bg-gray-700 rounded-lg p-3 text-sm
+                       text-gray-400 transition-colors"
+          >
+            Show Recovery Phrase
+          </button>
+        )}
+      </div>
+
+      {/* Network Configuration */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm text-gray-400">Identities</h3>
+          <h3 className="text-sm text-gray-400">Network</h3>
           <button
-            onClick={() => setShowNewIdentity(true)}
+            onClick={() => setShowNetworkConfig(!showNetworkConfig)}
             className="text-sm text-purple-400 hover:text-purple-300"
           >
-            + Add
+            {showNetworkConfig ? 'Hide' : 'Configure'}
           </button>
         </div>
 
-        <div className="space-y-2">
-          {identities.map((identity) => (
+        {showNetworkConfig ? (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Gateway URL</label>
+              <input
+                type="text"
+                value={gatewayUrl}
+                onChange={(e) => setGatewayUrl(e.target.value)}
+                placeholder={GATEWAY_URL}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
+                           text-white placeholder-gray-500 text-sm font-mono
+                           focus:outline-none focus:border-purple-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">API Key (optional)</label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter API key"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
+                           text-white placeholder-gray-500 text-sm
+                           focus:outline-none focus:border-purple-500"
+              />
+            </div>
             <button
-              key={identity.id}
-              onClick={() => switchIdentity(identity.id)}
-              className={`w-full p-3 rounded-lg text-left flex items-center justify-between
-                         transition-colors ${
-                           identity.id === activeIdentity?.id
-                             ? 'bg-purple-600/20 border border-purple-500'
-                             : 'bg-gray-800 hover:bg-gray-700'
-                         }`}
+              onClick={handleSaveNetwork}
+              disabled={networkSaving}
+              className={`w-full py-2 px-4 rounded-lg text-sm transition-colors ${
+                networkSaved
+                  ? 'bg-green-600/20 text-green-400'
+                  : 'bg-purple-600 hover:bg-purple-700 text-white'
+              }`}
             >
-              <div>
-                <div className="font-medium">{identity.label}</div>
-                <div className="text-xs text-gray-500 font-mono">
-                  {identity.publicKey.slice(0, 16)}...
-                </div>
-              </div>
-              {identity.id === activeIdentity?.id && (
-                <span className="text-xs text-purple-400">Active</span>
-              )}
+              {networkSaving ? 'Saving...' : networkSaved ? 'Saved!' : 'Save Network Settings'}
             </button>
-          ))}
-        </div>
-
-        {showNewIdentity && (
-          <div className="mt-3 flex gap-2">
-            <input
-              type="text"
-              value={newIdentityLabel}
-              onChange={(e) => setNewIdentityLabel(e.target.value)}
-              placeholder="Identity name"
-              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
-                         text-white placeholder-gray-500 text-sm
-                         focus:outline-none focus:border-purple-500"
-            />
-            <button
-              onClick={handleCreateIdentity}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm"
-            >
-              Add
-            </button>
+            <p className="text-xs text-gray-500">
+              Changes take effect immediately. Lock and unlock wallet to reconnect.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-gray-800 rounded-lg p-3">
+            <div className="text-xs text-gray-500 mb-1">Current Gateway</div>
+            <div className="text-xs font-mono text-gray-300 truncate">{gatewayUrl}</div>
+            {apiKey && (
+              <div className="text-xs text-green-400 mt-1">API Key configured</div>
+            )}
           </div>
         )}
       </div>
@@ -176,9 +266,22 @@ export function Settings() {
       <button
         onClick={lockWallet}
         className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400
-                   py-3 px-4 rounded-lg transition-colors"
+                   py-3 px-4 rounded-lg transition-colors mb-3"
       >
         Lock Wallet
+      </button>
+
+      {/* Reset Wallet */}
+      <button
+        onClick={() => {
+          if (confirm('This will permanently delete your wallet. Make sure you have backed up your recovery phrase. Continue?')) {
+            resetWallet();
+          }
+        }}
+        className="w-full bg-red-600/10 hover:bg-red-600/20 text-red-400/70
+                   py-2 px-4 rounded-lg transition-colors text-sm"
+      >
+        Reset Wallet
       </button>
     </div>
   );

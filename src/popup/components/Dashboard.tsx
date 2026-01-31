@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { useWallet } from '../hooks/useWallet';
-import { ALPHA_COIN_ID } from '@/shared/constants';
+import { ALPHA_COIN_ID, DEFAULT_COIN_SYMBOL } from '@/shared/constants';
 
 export function Dashboard() {
   const { activeIdentity, balances, setView } = useStore();
@@ -17,12 +17,13 @@ export function Dashboard() {
     getAddress().then(setAddress).catch(console.error);
   }, [getAddress]);
 
-  const alphaBalance = balances.find((b) => b.coinId === ALPHA_COIN_ID);
+  // Get primary balance (first balance or one matching ALPHA_COIN_ID)
+  const primaryBalance = balances.find((b) => b.coinId === ALPHA_COIN_ID) || balances[0];
 
   const formatBalance = (amount: string): string => {
     const num = parseFloat(amount);
-    if (num === 0) return '0';
-    if (num < 0.0001) return '< 0.0001';
+    if (isNaN(num) || num === 0) return '0';
+    if (num < 0.0001 && num > 0) return '< 0.0001';
     return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
   };
 
@@ -66,7 +67,7 @@ export function Dashboard() {
       <div className="bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl p-6 mb-6">
         <div className="text-sm text-white/80 mb-1">Total Balance</div>
         <div className="text-3xl font-bold text-white mb-4">
-          {formatBalance(alphaBalance?.amount || '0')} {alphaBalance?.symbol || 'ALPHA'}
+          {formatBalance(primaryBalance?.amount || '0')} {primaryBalance?.symbol || DEFAULT_COIN_SYMBOL}
         </div>
 
         {/* Address */}

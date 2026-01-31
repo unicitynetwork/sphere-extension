@@ -126,6 +126,14 @@ export interface UserPreferences {
   showBalanceInPopup: boolean;
 }
 
+/** Aggregator configuration for network access */
+export interface AggregatorConfig {
+  /** Gateway URL for the aggregator */
+  gatewayUrl: string;
+  /** API key for authentication (optional) */
+  apiKey?: string;
+}
+
 export interface SessionData {
   /** Derived encryption key (hex) - only stored while unlocked */
   encryptionKey?: string;
@@ -174,11 +182,9 @@ export type PopupMessageType =
   | 'POPUP_UNLOCK_WALLET'
   | 'POPUP_LOCK_WALLET'
   | 'POPUP_GET_IDENTITIES'
-  | 'POPUP_CREATE_IDENTITY'
-  | 'POPUP_SWITCH_IDENTITY'
-  | 'POPUP_REMOVE_IDENTITY'
   | 'POPUP_GET_BALANCES'
   | 'POPUP_EXPORT_WALLET'
+  | 'POPUP_GET_MNEMONIC'
   | 'POPUP_GET_PENDING_TRANSACTIONS'
   | 'POPUP_APPROVE_TRANSACTION'
   | 'POPUP_REJECT_TRANSACTION'
@@ -186,7 +192,11 @@ export type PopupMessageType =
   | 'POPUP_GET_ADDRESS'
   | 'POPUP_CHECK_NAMETAG_AVAILABLE'
   | 'POPUP_REGISTER_NAMETAG'
-  | 'POPUP_GET_MY_NAMETAG';
+  | 'POPUP_GET_MY_NAMETAG'
+  | 'POPUP_GET_AGGREGATOR_CONFIG'
+  | 'POPUP_SET_AGGREGATOR_CONFIG'
+  | 'POPUP_SEND_TOKENS'
+  | 'POPUP_RESOLVE_NAMETAG';
 
 // ============ Request/Response Types ============
 
@@ -304,34 +314,17 @@ export interface PopupGetStateResponse extends BaseResponse {
 export interface PopupCreateWalletRequest {
   type: 'POPUP_CREATE_WALLET';
   password: string;
-  walletName?: string;
-  identityLabel?: string;
 }
 
 export interface PopupImportWalletRequest {
   type: 'POPUP_IMPORT_WALLET';
-  walletJson: string;
+  mnemonic: string;
   password: string;
 }
 
 export interface PopupUnlockWalletRequest {
   type: 'POPUP_UNLOCK_WALLET';
   password: string;
-}
-
-export interface PopupCreateIdentityRequest {
-  type: 'POPUP_CREATE_IDENTITY';
-  label: string;
-}
-
-export interface PopupSwitchIdentityRequest {
-  type: 'POPUP_SWITCH_IDENTITY';
-  identityId: string;
-}
-
-export interface PopupRemoveIdentityRequest {
-  type: 'POPUP_REMOVE_IDENTITY';
-  identityId: string;
 }
 
 export interface PopupApproveTransactionRequest {

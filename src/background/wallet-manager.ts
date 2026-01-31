@@ -1,425 +1,413 @@
 /**
- * Wallet Manager - wraps Alphalite Wallet for extension use.
+ * Wallet Manager - wraps Sphere SDK for extension use.
  *
  * Handles:
- * - Wallet creation with password encryption
- * - Wallet import from JSON
+ * - Wallet creation with BIP39 mnemonic + password encryption
+ * - Wallet import from mnemonic
  * - Unlock/lock operations
- * - Multi-identity management
+ * - HD address derivation
  * - Balance queries
+ * - Token sending/receiving via SDK
+ * - Nametag operations
  */
 
-import { Wallet, Identity, AlphaClient } from '@jvsteiner/alphalite';
-import type { IWalletJson } from '@jvsteiner/alphalite';
-import { ProxyAddress } from '@unicitylabs/state-transition-sdk/lib/address/ProxyAddress';
-import type { IdentityInfo, TokenBalance, WalletState, SendTokensResult, NametagResolution, StoredNametag, NametagInfo } from '@/shared/types';
-import { COIN_SYMBOLS, ALPHA_COIN_ID, GATEWAY_URL } from '@/shared/constants';
+import { Sphere } from '@unicitylabs/sphere-sdk';
+import {
+  createNostrTransportProvider,
+  createUnicityAggregatorProvider,
+  createIndexedDBTokenStorageProvider,
+} from '@unicitylabs/sphere-sdk/impl/browser';
+import { createChromeStorageProvider } from './providers';
+import type {
+  IdentityInfo,
+  TokenBalance,
+  WalletState,
+  SendTokensResult,
+  NametagResolution,
+  StoredNametag,
+  NametagInfo,
+  AggregatorConfig,
+} from '@/shared/types';
+import { COIN_SYMBOLS, COIN_DECIMALS, DEFAULT_DECIMALS, ALPHA_COIN_ID, GATEWAY_URL, DEFAULT_NOSTR_RELAYS } from '@/shared/constants';
 import { deriveNostrKeyPair, signNostrEvent, signMessage } from './nostr-keys';
-import { nostrService } from './nostr-service';
-import { TokenTransferService } from './token-transfer-service';
 
-/**
- * In-memory wallet state (cleared on lock or extension restart)
- */
-interface UnlockedWallet {
-  wallet: Wallet;
-  password: string;
+// Storage key for the encrypted mnemonic
+const ENCRYPTED_MNEMONIC_KEY = 'encryptedMnemonic';
+
+
+// ============ Mnemonic Encryption (SubtleCrypto) ============
+
+async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt as BufferSource, iterations: 100_000, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+async function encryptMnemonic(mnemonic: string, password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(password, salt);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    new TextEncoder().encode(mnemonic),
+  );
+  // Pack salt + iv + ciphertext as hex
+  const packed = new Uint8Array(salt.length + iv.length + new Uint8Array(ciphertext).length);
+  packed.set(salt, 0);
+  packed.set(iv, salt.length);
+  packed.set(new Uint8Array(ciphertext), salt.length + iv.length);
+  return Array.from(packed).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function decryptMnemonic(encrypted: string, password: string): Promise<string> {
+  const packed = new Uint8Array(encrypted.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+  const salt = packed.slice(0, 16);
+  const iv = packed.slice(16, 28);
+  const ciphertext = packed.slice(28);
+  const key = await deriveKey(password, salt);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    ciphertext,
+  );
+  return new TextDecoder().decode(plaintext);
 }
 
 /**
  * WalletManager provides a high-level interface for wallet operations.
  */
 export class WalletManager {
-  private unlockedWallet: UnlockedWallet | null = null;
-  private alphaClient: AlphaClient | null = null;
+  private sphere: Sphere | null = null;
+  private password: string | null = null;
+  private cachedAggregatorConfig: AggregatorConfig | null = null;
 
   /**
    * Get the current wallet state.
    */
   async getState(): Promise<WalletState> {
-    const result = await chrome.storage.local.get(['encryptedWallet']);
+    const result = await chrome.storage.local.get([ENCRYPTED_MNEMONIC_KEY]);
 
     return {
-      hasWallet: !!result.encryptedWallet,
-      isUnlocked: this.unlockedWallet !== null,
-      activeIdentityId: this.unlockedWallet?.wallet.getDefaultIdentity().id ?? null,
+      hasWallet: !!result[ENCRYPTED_MNEMONIC_KEY],
+      isUnlocked: this.sphere !== null,
+      activeIdentityId: this.sphere?.identity?.address ?? null,
     };
   }
 
   /**
    * Create a new wallet with the given password.
+   * Returns identity info and the mnemonic for user backup.
    */
-  async createWallet(password: string, name?: string, identityLabel?: string): Promise<IdentityInfo> {
-    // Create new wallet
-    const wallet = await Wallet.create({
-      name: name ?? 'Sphere Wallet',
-      identityLabel: identityLabel ?? 'Default',
-    });
+  async createWallet(password: string): Promise<{ identity: IdentityInfo; mnemonic: string }> {
+    const mnemonic = Sphere.generateMnemonic();
 
-    // Export and encrypt with password
-    const walletJson = wallet.toJSON({ password });
+    // Encrypt mnemonic and store
+    const encrypted = await encryptMnemonic(mnemonic, password);
+    await chrome.storage.local.set({ [ENCRYPTED_MNEMONIC_KEY]: encrypted });
 
-    // Save to storage
-    await chrome.storage.local.set({
-      encryptedWallet: JSON.stringify(walletJson),
-    });
+    // Load aggregator config (API key, gateway URL)
+    await this.loadAggregatorConfig();
 
-    // Keep wallet unlocked in memory
-    this.unlockedWallet = { wallet, password };
+    // Create sphere instance
+    this.sphere = await this.createSphereFromMnemonic(mnemonic);
+    this.password = password;
 
-    // Connect to NOSTR relay
-    await this.connectNostr();
+    const identity = this.getActiveIdentity();
 
-    // Return the default identity info
-    return this.identityToInfo(wallet.getDefaultIdentity());
+    return { identity, mnemonic };
   }
 
   /**
-   * Import wallet from JSON string.
+   * Import wallet from mnemonic.
    */
-  async importWallet(walletJsonStr: string, password: string): Promise<IdentityInfo> {
-    const walletJson = JSON.parse(walletJsonStr) as IWalletJson;
+  async importWallet(mnemonic: string, password: string): Promise<IdentityInfo> {
+    if (!Sphere.validateMnemonic(mnemonic)) {
+      throw new Error('Invalid mnemonic phrase');
+    }
 
-    // Import with password decryption
-    const wallet = await Wallet.fromJSON(walletJson, { password });
+    // Encrypt mnemonic and store
+    const encrypted = await encryptMnemonic(mnemonic, password);
+    await chrome.storage.local.set({ [ENCRYPTED_MNEMONIC_KEY]: encrypted });
 
-    // Re-export with password to ensure consistent encryption
-    const reExportedJson = wallet.toJSON({ password });
+    // Load aggregator config (API key, gateway URL)
+    await this.loadAggregatorConfig();
 
-    // Save to storage
-    await chrome.storage.local.set({
-      encryptedWallet: JSON.stringify(reExportedJson),
-    });
+    // Create sphere instance
+    this.sphere = await this.createSphereFromMnemonic(mnemonic);
+    this.password = password;
 
-    // Keep wallet unlocked in memory
-    this.unlockedWallet = { wallet, password };
-
-    // Connect to NOSTR relay
-    await this.connectNostr();
-
-    return this.identityToInfo(wallet.getDefaultIdentity());
+    return this.getActiveIdentity();
   }
 
   /**
    * Unlock the wallet with password.
    */
   async unlock(password: string): Promise<IdentityInfo> {
-    const result = await chrome.storage.local.get(['encryptedWallet']);
+    const result = await chrome.storage.local.get([ENCRYPTED_MNEMONIC_KEY]);
 
-    if (!result.encryptedWallet) {
+    if (!result[ENCRYPTED_MNEMONIC_KEY]) {
       throw new Error('No wallet found');
     }
 
-    const walletJson = JSON.parse(result.encryptedWallet) as IWalletJson;
+    // Decrypt mnemonic (throws on wrong password)
+    const mnemonic = await decryptMnemonic(result[ENCRYPTED_MNEMONIC_KEY], password);
 
-    // This will throw if password is wrong
-    const wallet = await Wallet.fromJSON(walletJson, { password });
+    // Load aggregator config
+    await this.loadAggregatorConfig();
 
-    this.unlockedWallet = { wallet, password };
+    // Create sphere instance
+    this.sphere = await this.createSphereFromMnemonic(mnemonic);
+    this.password = password;
 
-    // Connect to NOSTR relay
-    await this.connectNostr();
+    // Set up incoming transfer listener
+    this.setupTransferListener();
 
-    return this.identityToInfo(wallet.getDefaultIdentity());
+    // Log identity info for debugging token receiving
+    const identity = this.sphere.identity;
+    console.log('[WalletManager] Wallet unlocked. Identity address:', identity?.address);
+    console.log('[WalletManager] Identity publicKey:', identity?.publicKey);
+    try {
+      const transport = (this.sphere as any).getTransport();
+      if (transport?.getNostrPubkey) {
+        console.log('[WalletManager] Transport NOSTR pubkey (sender must target this):', transport.getNostrPubkey());
+      }
+    } catch (e) {
+      console.log('[WalletManager] Could not read transport pubkey:', e);
+    }
+
+    return this.getActiveIdentity();
+  }
+
+  /**
+   * Reset the wallet - clear all data and start fresh.
+   */
+  async resetWallet(): Promise<void> {
+    // Destroy sphere instance if active
+    if (this.sphere) {
+      try {
+        await this.sphere.destroy();
+      } catch (err) {
+        console.error('[WalletManager] Error destroying sphere during reset:', err);
+      }
+    }
+    this.sphere = null;
+    this.password = null;
+    this.cachedAggregatorConfig = null;
+
+    // Clear all wallet data from chrome storage
+    await chrome.storage.local.remove([
+      ENCRYPTED_MNEMONIC_KEY,
+      'nametag',
+    ]);
+
+    // Clear SDK storage (keys prefixed with sphere_sdk2_)
+    const all = await chrome.storage.local.get(null);
+    const sdkKeys = Object.keys(all).filter((k) => k.startsWith('sphere_sdk2_'));
+    if (sdkKeys.length > 0) {
+      await chrome.storage.local.remove(sdkKeys);
+    }
+
+    // Clear IndexedDB token storage used by SDK
+    try {
+      const dbs = await indexedDB.databases();
+      for (const db of dbs) {
+        if (db.name) {
+          indexedDB.deleteDatabase(db.name);
+        }
+      }
+    } catch (e) {
+      console.warn('[WalletManager] Could not clear IndexedDB:', e);
+    }
+
+    console.log('[WalletManager] Wallet reset complete');
   }
 
   /**
    * Lock the wallet (clear from memory).
    */
   async lock(): Promise<void> {
-    // Disconnect from NOSTR relay
-    await nostrService.disconnect();
-
-    this.unlockedWallet = null;
-    this.alphaClient = null;
+    if (this.sphere) {
+      try {
+        await this.sphere.destroy();
+      } catch (err) {
+        console.error('[WalletManager] Error destroying sphere:', err);
+      }
+    }
+    this.sphere = null;
+    this.password = null;
+    this.cachedAggregatorConfig = null;
   }
 
-  /**
-   * Check if wallet is unlocked.
-   */
+  // ============ Aggregator Config ============
+
+  private async loadAggregatorConfig(): Promise<void> {
+    const result = await chrome.storage.local.get(['aggregatorConfig']);
+    this.cachedAggregatorConfig = result.aggregatorConfig || null;
+  }
+
+  async getAggregatorConfig(): Promise<AggregatorConfig> {
+    const result = await chrome.storage.local.get(['aggregatorConfig']);
+    return result.aggregatorConfig || {
+      gatewayUrl: GATEWAY_URL,
+      apiKey: undefined,
+    };
+  }
+
+  async setAggregatorConfig(config: AggregatorConfig): Promise<void> {
+    await chrome.storage.local.set({ aggregatorConfig: config });
+    this.cachedAggregatorConfig = config;
+  }
+
+  // ============ State Checks ============
+
   isUnlocked(): boolean {
-    return this.unlockedWallet !== null;
+    return this.sphere !== null;
   }
 
-  /**
-   * Get the unlocked wallet (throws if locked).
-   */
-  private getWallet(): Wallet {
-    if (!this.unlockedWallet) {
+  private getSphere(): Sphere {
+    if (!this.sphere) {
       throw new Error('Wallet is locked');
     }
-    return this.unlockedWallet.wallet;
+    return this.sphere;
   }
 
-  /**
-   * Save the current wallet state to storage.
-   */
-  private async saveWallet(): Promise<void> {
-    if (!this.unlockedWallet) {
-      throw new Error('Wallet is locked');
-    }
+  // ============ Identity / Address ============
 
-    const walletJson = this.unlockedWallet.wallet.toJSON({
-      password: this.unlockedWallet.password,
-    });
-
-    await chrome.storage.local.set({
-      encryptedWallet: JSON.stringify(walletJson),
-    });
-  }
-
-  // ============ Identity Management ============
-
-  /**
-   * Get the active (default) identity.
-   */
   getActiveIdentity(): IdentityInfo {
-    const wallet = this.getWallet();
-    return this.identityToInfo(wallet.getDefaultIdentity());
+    const sphere = this.getSphere();
+    const identity = sphere.identity;
+    if (!identity) {
+      throw new Error('No active identity');
+    }
+
+    return {
+      id: identity.address,
+      label: identity.nametag ? `@${identity.nametag}` : 'Default',
+      publicKey: identity.publicKey,
+      createdAt: new Date().toISOString(),
+    };
   }
 
   /**
-   * List all identities.
+   * List identities - with HD wallets we return the active address.
    */
   listIdentities(): IdentityInfo[] {
-    const wallet = this.getWallet();
-    return wallet.listIdentities().map((id) => this.identityToInfo(id));
-  }
-
-  /**
-   * Create a new identity.
-   */
-  async createIdentity(label: string): Promise<IdentityInfo> {
-    const wallet = this.getWallet();
-    const identity = await wallet.createIdentity({ label });
-    await this.saveWallet();
-    return this.identityToInfo(identity);
-  }
-
-  /**
-   * Switch the active identity.
-   */
-  async switchIdentity(identityId: string): Promise<IdentityInfo> {
-    const wallet = this.getWallet();
-    wallet.setDefaultIdentity(identityId);
-    await this.saveWallet();
-    return this.identityToInfo(wallet.getDefaultIdentity());
-  }
-
-  /**
-   * Remove an identity.
-   */
-  async removeIdentity(identityId: string): Promise<void> {
-    const wallet = this.getWallet();
-    wallet.removeIdentity(identityId);
-    await this.saveWallet();
-  }
-
-  /**
-   * Get identity by ID.
-   */
-  getIdentity(identityId: string): Identity | undefined {
-    const wallet = this.getWallet();
-    return wallet.getIdentity(identityId);
+    return [this.getActiveIdentity()];
   }
 
   // ============ Balance Methods ============
 
-  /**
-   * Get all token balances for the active identity.
-   */
   getBalances(): TokenBalance[] {
-    const wallet = this.getWallet();
-    const activeIdentity = wallet.getDefaultIdentity();
-    const balanceMap = wallet.getBalances(activeIdentity.id);
-
+    const sphere = this.getSphere();
     const balances: TokenBalance[] = [];
 
-    // Always include ALPHA even if balance is 0
-    const alphaBalance = balanceMap.get(ALPHA_COIN_ID) ?? 0n;
-    balances.push({
-      coinId: ALPHA_COIN_ID,
-      symbol: COIN_SYMBOLS[ALPHA_COIN_ID] ?? 'ALPHA',
-      amount: alphaBalance.toString(),
-    });
+    try {
+      // Get all balances from the SDK
+      const sdkBalances = sphere.payments.getBalance();
 
-    // Add other coins
-    for (const [coinId, amount] of balanceMap) {
-      if (coinId === ALPHA_COIN_ID) continue;
+      if (sdkBalances.length > 0) {
+        for (const bal of sdkBalances) {
+          console.log('[WalletManager] SDK balance:', JSON.stringify(bal));
+          const decimals = COIN_DECIMALS[bal.coinId] ?? bal.decimals ?? DEFAULT_DECIMALS;
+          const formatted = formatSmallestUnits(bal.totalAmount, decimals);
+          console.log('[WalletManager] Formatted:', bal.coinId.slice(0, 8), formatted, 'decimals:', decimals);
+          // Skip zero-balance unknown tokens
+          if (formatted === '0' && !COIN_SYMBOLS[bal.coinId]) continue;
+          balances.push({
+            coinId: bal.coinId,
+            symbol: COIN_SYMBOLS[bal.coinId] || bal.symbol || 'TOKEN',
+            amount: formatted,
+          });
+        }
+      } else {
+        balances.push({
+          coinId: ALPHA_COIN_ID,
+          symbol: 'UCT',
+          amount: '0',
+        });
+      }
+    } catch (error) {
+      console.error('[WalletManager] Error getting balances:', error);
       balances.push({
-        coinId,
-        symbol: COIN_SYMBOLS[coinId] ?? coinId.slice(0, 8).toUpperCase(),
-        amount: amount.toString(),
+        coinId: ALPHA_COIN_ID,
+        symbol: 'UCT',
+        amount: '0',
       });
     }
 
     return balances;
   }
 
-  /**
-   * Get balance for a specific coin.
-   */
   getBalance(coinId: string): bigint {
-    const wallet = this.getWallet();
-    const activeIdentity = wallet.getDefaultIdentity();
-    return wallet.getBalance(coinId, activeIdentity.id);
+    const sphere = this.getSphere();
+    try {
+      const sdkBalances = sphere.payments.getBalance(coinId);
+      if (sdkBalances.length > 0) {
+        return BigInt(sdkBalances[0].totalAmount);
+      }
+      return 0n;
+    } catch {
+      return 0n;
+    }
   }
 
-  /**
-   * Check if wallet can afford an amount.
-   */
   canAfford(coinId: string, amount: bigint): boolean {
-    const wallet = this.getWallet();
-    const activeIdentity = wallet.getDefaultIdentity();
-    return wallet.canAfford(coinId, amount, activeIdentity.id);
+    return this.getBalance(coinId) >= amount;
   }
 
   // ============ Address Methods ============
 
-  /**
-   * Get the receive address for the active identity.
-   */
-  async getAddress(tokenType?: Uint8Array): Promise<string> {
-    const wallet = this.getWallet();
-    const activeIdentity = wallet.getDefaultIdentity();
-    return wallet.getAddress(activeIdentity.id, tokenType);
+  async getAddress(): Promise<string> {
+    const sphere = this.getSphere();
+    return sphere.identity?.address ?? '';
   }
 
   // ============ Token Operations ============
 
   /**
-   * Initialize or get the AlphaClient instance.
-   */
-  private getAlphaClient(): AlphaClient {
-    if (!this.alphaClient) {
-      this.alphaClient = new AlphaClient({
-        gatewayUrl: GATEWAY_URL,
-        onWalletStateChange: async () => {
-          // Auto-save wallet after blockchain operations
-          await this.saveWallet();
-        },
-      });
-    }
-    return this.alphaClient;
-  }
-
-  /**
    * Send tokens to a recipient.
-   *
-   * Supports sending to:
-   * - Public key (hex string starting with valid hex)
-   * - Nametag (e.g., "@alice" or "alice")
-   *
-   * When sending to a nametag:
-   * - Resolves nametag to proxy address
-   * - Sends tokens to proxy address
-   * - Sends P2P notification via NOSTR to recipient's pubkey
-   *
-   * @param coinId Hex-encoded coin ID
-   * @param amount Amount to send (as string to handle bigint)
-   * @param recipient Recipient's public key OR nametag
-   * @returns Result containing transaction ID and payload
+   * Supports sending to public key/address or @nametag.
    */
   async sendAmount(
     coinId: string,
     amount: string,
     recipient: string
   ): Promise<SendTokensResult> {
-    const wallet = this.getWallet();
-    const client = this.getAlphaClient();
-    const amountBigInt = BigInt(amount);
+    const sphere = this.getSphere();
 
-    let recipientAddress: string;
-    let recipientPubkey: string | null = null;
-
-    // Check if recipient is a nametag
-    const isNametag = recipient.startsWith('@') || !this.isHexString(recipient);
-
-    if (isNametag) {
-      // Resolve nametag to proxy address and pubkey
-      const resolution = await this.resolveNametag(recipient);
-      if (!resolution) {
-        const cleanTag = recipient.replace('@', '').trim();
-        throw new Error(`Nametag @${cleanTag} not found`);
-      }
-      recipientAddress = resolution.proxyAddress;
-      recipientPubkey = resolution.pubkey;
-    } else {
-      // Recipient is a direct public key
-      recipientAddress = recipient;
-    }
-
-    // Send tokens to the address
-    const result = await client.sendAmount(
-      wallet,
+    const result = await sphere.payments.send({
       coinId,
-      amountBigInt,
-      recipientAddress
-    );
-
-    // Save wallet after successful send
-    await this.saveWallet();
-
-    // If sending to nametag, send P2P notification via NOSTR
-    if (recipientPubkey && nostrService.getIsConnected()) {
-      try {
-        await nostrService.sendTokenTransfer(
-          recipientPubkey,
-          result.recipientPayload,
-          { amount: amountBigInt, symbol: COIN_SYMBOLS[coinId] ?? 'TOKEN' }
-        );
-      } catch (error) {
-        // Log but don't fail the transaction - tokens are already sent
-        console.error('Failed to send NOSTR notification:', error);
-      }
-    }
+      amount,
+      recipient,
+    });
 
     return {
-      transactionId: `tx_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-      recipientPayload: result.recipientPayload,
-      sent: result.sent.toString(),
-      tokensUsed: result.tokensUsed,
-      splitPerformed: result.splitPerformed,
+      transactionId: result.id ?? `tx_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      recipientPayload: '', // SDK handles delivery via transport
+      sent: amount,
+      tokensUsed: result.tokens?.length ?? 1,
+      splitPerformed: false,
     };
-  }
-
-  /**
-   * Check if a string is a valid hex string (for public keys/addresses).
-   */
-  private isHexString(str: string): boolean {
-    // Valid hex strings are even length and contain only hex characters
-    return /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0 && str.length >= 32;
-  }
-
-  /**
-   * Receive tokens from a sender.
-   *
-   * @param payloadJson JSON string from sender (from sendAmount result)
-   * @returns Array of received token IDs
-   */
-  async receiveAmount(payloadJson: string): Promise<string[]> {
-    const wallet = this.getWallet();
-    const client = this.getAlphaClient();
-
-    const tokens = await client.receiveAmount(wallet, payloadJson);
-
-    // Save wallet after successful receive
-    await this.saveWallet();
-
-    return tokens.map((t) => t.id);
   }
 
   // ============ NOSTR Key Operations ============
 
-  /**
-   * Get NOSTR public key for the active identity.
-   *
-   * @returns Object with hex and npub formats
-   */
   getNostrPublicKey(): { hex: string; npub: string } {
-    const wallet = this.getWallet();
-    const activeIdentity = wallet.getDefaultIdentity();
-    const keyPair = deriveNostrKeyPair(activeIdentity);
+    const sphere = this.getSphere();
+    const keyPair = deriveNostrKeyPair(sphere);
 
     return {
       hex: keyPair.publicKeyHex,
@@ -427,117 +415,140 @@ export class WalletManager {
     };
   }
 
-  /**
-   * Sign a NOSTR event hash.
-   *
-   * @param eventHash 32-byte event hash as hex string
-   * @returns 64-byte Schnorr signature as hex string
-   */
   signNostrEventHash(eventHash: string): string {
-    const wallet = this.getWallet();
-    const activeIdentity = wallet.getDefaultIdentity();
-    const keyPair = deriveNostrKeyPair(activeIdentity);
-
-    // Convert hex to bytes
-    const hashBytes = this.hexToBytes(eventHash);
-
+    const sphere = this.getSphere();
+    const keyPair = deriveNostrKeyPair(sphere);
+    const hashBytes = hexToBytes(eventHash);
     return signNostrEvent(keyPair.privateKey, hashBytes);
   }
 
-  /**
-   * Sign a message with the active identity.
-   *
-   * @param message Message string to sign
-   * @returns Signature as hex string
-   */
   signMessageWithIdentity(message: string): string {
-    const wallet = this.getWallet();
-    const activeIdentity = wallet.getDefaultIdentity();
-    const keyPair = deriveNostrKeyPair(activeIdentity);
-
+    const sphere = this.getSphere();
+    const keyPair = deriveNostrKeyPair(sphere);
     return signMessage(keyPair.privateKey, message);
   }
 
   // ============ Export ============
 
-  /**
-   * Export wallet as encrypted JSON.
-   */
   exportWallet(): string {
-    if (!this.unlockedWallet) {
-      throw new Error('Wallet is locked');
-    }
-
-    const walletJson = this.unlockedWallet.wallet.toJSON({
-      password: this.unlockedWallet.password,
-      includeTokens: true,
+    const sphere = this.getSphere();
+    const walletJson = sphere.exportToJSON({
+      password: this.password ?? undefined,
+      includeMnemonic: true,
     });
-
     return JSON.stringify(walletJson, null, 2);
   }
 
   /**
-   * Get the raw Wallet instance (for advanced operations).
+   * Get the mnemonic for backup display.
    */
-  getRawWallet(): Wallet {
-    return this.getWallet();
+  getMnemonic(): string | null {
+    const sphere = this.getSphere();
+    return sphere.getMnemonic();
   }
 
   // ============ Nametag Operations ============
 
-  /**
-   * Resolve a nametag to its NOSTR pubkey and proxy address.
-   *
-   * @param nametag Nametag to resolve (with or without @)
-   * @returns Resolution info or null if not found
-   */
   async resolveNametag(nametag: string): Promise<NametagResolution | null> {
-    // Clean the nametag
-    const cleanTag = nametag.replace('@unicity', '').replace('@', '').trim();
+    const sphere = this.getSphere();
+    const cleanTag = nametag.replace('@unicity', '').replace('@', '').trim().toLowerCase();
 
-    // Query NOSTR for the pubkey
-    const pubkey = await nostrService.queryPubkeyByNametag(cleanTag);
-    if (!pubkey) {
+    try {
+      const transport = sphere.getTransport();
+      if (!transport.resolveNametag) {
+        console.warn('[WalletManager] Transport does not support nametag resolution');
+        return null;
+      }
+
+      const pubkey = await transport.resolveNametag(cleanTag);
+      if (!pubkey) {
+        return null;
+      }
+
+      return {
+        nametag: cleanTag,
+        pubkey,
+        proxyAddress: pubkey, // The SDK transport handles routing
+      };
+    } catch (error) {
+      console.error('[WalletManager] Nametag resolution error:', error);
       return null;
     }
+  }
 
-    // Derive the proxy address from the nametag
-    const proxyAddress = await ProxyAddress.fromNameTag(cleanTag);
+  async isNametagAvailable(nametag: string): Promise<boolean> {
+    const sphere = this.getSphere();
+    const cleanTag = nametag.replace('@', '').trim().toLowerCase();
 
-    return {
+    try {
+      // Debug: check oracle state
+      const oracle = (sphere as any).getOracle?.() ?? (sphere as any)._oracle;
+      console.log('[WalletManager] Oracle trustBase:', !!oracle?.getTrustBase?.());
+      console.log('[WalletManager] Oracle stClient:', !!oracle?.getStateTransitionClient?.());
+
+      const result = await sphere.isNametagAvailable(cleanTag);
+      console.log('[WalletManager] isNametagAvailable result for', cleanTag, ':', result);
+      return result;
+    } catch (error) {
+      console.error('[WalletManager] Nametag availability check error:', error);
+      return false;
+    }
+  }
+
+  async registerNametag(nametag: string): Promise<NametagInfo> {
+    const sphere = this.getSphere();
+    const cleanTag = nametag.replace('@', '').trim().toLowerCase();
+
+    // Register NOSTR binding
+    await sphere.registerNametag(cleanTag);
+
+    // Mint on-chain nametag token (required for receiving PROXY transfers)
+    // Note: sphere.registerNametag already attempts mintNametag internally,
+    // but we call it again explicitly in case the internal attempt failed silently
+    if (!(sphere as any)._payments?.hasNametag?.()) {
+      const mintResult = await (sphere as any).mintNametag(cleanTag);
+      if (!mintResult.success) {
+        console.error('[WalletManager] Nametag mint failed:', JSON.stringify(mintResult));
+        throw new Error(`Nametag NOSTR binding succeeded but on-chain mint failed: ${JSON.stringify(mintResult.error)}`);
+      }
+      console.log('[WalletManager] Nametag minted on-chain:', cleanTag);
+    } else {
+      console.log('[WalletManager] Nametag token already present, skipping mint');
+    }
+
+    const nametagInfo: NametagInfo = {
       nametag: cleanTag,
-      pubkey,
-      proxyAddress: proxyAddress.address,
+      proxyAddress: sphere.identity?.predicateAddress ?? '',
+      tokenId: '',
+      status: 'active',
     };
+
+    // Save to chrome storage for local lookup
+    await this.saveNametag({
+      name: cleanTag,
+      tokenJson: '{}',
+      proxyAddress: nametagInfo.proxyAddress,
+      timestamp: Date.now(),
+    });
+
+    return nametagInfo;
   }
 
   // ============ Nametag Storage ============
 
-  /**
-   * Get stored nametag from chrome.storage.
-   */
   async getStoredNametag(): Promise<StoredNametag | null> {
     const result = await chrome.storage.local.get(['nametag']);
     return result.nametag || null;
   }
 
-  /**
-   * Save nametag to chrome.storage.
-   */
   async saveNametag(nametag: StoredNametag): Promise<void> {
     await chrome.storage.local.set({ nametag });
   }
 
-  /**
-   * Delete nametag from chrome.storage.
-   */
   async deleteNametag(): Promise<void> {
     await chrome.storage.local.remove(['nametag']);
   }
 
-  /**
-   * Get nametag info for UI display.
-   */
   async getMyNametag(): Promise<NametagInfo | null> {
     const stored = await this.getStoredNametag();
     if (!stored) return null;
@@ -545,110 +556,88 @@ export class WalletManager {
     return {
       nametag: stored.name,
       proxyAddress: stored.proxyAddress,
-      tokenId: '', // Token ID can be derived from the token JSON if needed
+      tokenId: '',
       status: 'active',
     };
   }
 
-  // ============ NOSTR Connection ============
+  // ============ Sphere Instance Creation ============
 
-  /**
-   * Connect to NOSTR relay with the active identity's key.
-   * Sets up token transfer handler for receiving tokens via NOSTR.
-   */
-  private async connectNostr(): Promise<void> {
-    if (!this.unlockedWallet) return;
+  private async createSphereFromMnemonic(mnemonic: string): Promise<Sphere> {
+    const config = this.cachedAggregatorConfig;
+    const gatewayUrl = config?.gatewayUrl || GATEWAY_URL;
 
-    try {
-      const activeIdentity = this.unlockedWallet.wallet.getDefaultIdentity();
-      const keyPair = deriveNostrKeyPair(activeIdentity);
-      const privateKeyHex = this.bytesToHex(keyPair.privateKey);
-      await nostrService.connect(privateKeyHex);
+    const storage = createChromeStorageProvider({ prefix: 'sphere_sdk2_', debug: true });
+    await storage.connect();
 
-      // Set up token transfer handler
-      this.setupTokenTransferHandler();
-    } catch (error) {
-      console.error('Failed to connect to NOSTR:', error);
-      // Don't throw - NOSTR is not critical for basic wallet operation
-    }
-  }
-
-  /**
-   * Set up handler for incoming token transfers via NOSTR.
-   */
-  private setupTokenTransferHandler(): void {
-    const tokenTransferService = new TokenTransferService({
-      onTokenReceived: async (tokenJson, transactionJson, senderPubkey) => {
-        console.log(`[WalletManager] Receiving token from ${senderPubkey.slice(0, 8)}...`);
-        try {
-          // Use the existing receiveAmount flow
-          // The payload format from NOSTR is: { sourceToken, transferTx }
-          // We need to construct the payload that receiveAmount expects
-          const payload = JSON.stringify({
-            token: JSON.parse(tokenJson),
-            transaction: JSON.parse(transactionJson),
-          });
-
-          const tokenIds = await this.receiveAmount(payload);
-          console.log(`[WalletManager] Received ${tokenIds.length} token(s)`);
-          return tokenIds.length > 0;
-        } catch (error) {
-          console.error('[WalletManager] Token receive failed:', error);
-          return false;
-        }
-      },
-
-      getStoredNametag: async () => {
-        return this.getStoredNametag();
-      },
+    const transport = createNostrTransportProvider({
+      relays: DEFAULT_NOSTR_RELAYS,
+      debug: true,
     });
 
-    // Register the handler with nostrService
-    nostrService.onTokenTransfer(async (transfer) => {
-      return tokenTransferService.processTransfer(transfer);
+    const oracle = createUnicityAggregatorProvider({
+      url: gatewayUrl,
+      apiKey: config?.apiKey,
+      trustBaseUrl: 'https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/bft-trustbase.testnet.json',
+      debug: true,
     });
 
-    console.log('[WalletManager] Token transfer handler configured');
+    const tokenStorage = createIndexedDBTokenStorageProvider();
+
+    // Use init() which auto-loads existing or creates new
+    const { sphere } = await Sphere.init({
+      mnemonic,
+      storage,
+      transport,
+      oracle,
+      tokenStorage,
+    });
+
+    return sphere;
   }
 
-  // ============ Helpers ============
+  // ============ Transfer Listener ============
 
-  /**
-   * Convert Identity to IdentityInfo.
-   */
-  private identityToInfo(identity: Identity): IdentityInfo {
-    return {
-      id: identity.id,
-      label: identity.label,
-      publicKey: this.bytesToHex(identity.publicKey),
-      createdAt: identity.createdAt.toISOString(),
-    };
+  private setupTransferListener(): void {
+    if (!this.sphere) return;
+
+    this.sphere.on('transfer:incoming', (data: unknown) => {
+      console.log('[WalletManager] Incoming transfer:', data);
+      // Balance updates automatically via SDK
+    });
+
+    console.log('[WalletManager] Transfer listener configured');
   }
+}
 
-  /**
-   * Convert bytes to hex string.
-   */
-  private bytesToHex(bytes: Uint8Array): string {
-    return Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
+// ============ Helpers ============
+
+/**
+ * Convert a smallest-unit amount string to a human-readable decimal string.
+ */
+function formatSmallestUnits(amount: string, decimals: number): string {
+  if (amount === '0' || !amount) return '0';
+  if (decimals === 0) return amount;
+
+  const padded = amount.padStart(decimals + 1, '0');
+  const integerPart = padded.slice(0, -decimals) || '0';
+  const fractionalPart = padded.slice(-decimals).replace(/0+$/, '');
+
+  if (fractionalPart) {
+    return `${integerPart}.${fractionalPart}`;
   }
+  return integerPart;
+}
 
-  /**
-   * Convert hex string to bytes.
-   */
-  private hexToBytes(hex: string): Uint8Array {
-    if (hex.length % 2 !== 0) {
-      throw new Error('Invalid hex string length');
-    }
-
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    }
-
-    return bytes;
+function hexToBytes(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) {
+    throw new Error('Invalid hex string length');
   }
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
 }
 
 // Singleton instance

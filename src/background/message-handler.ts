@@ -10,7 +10,6 @@
 
 import { walletManager } from './wallet-manager';
 import { nametagMintService } from './nametag-mint-service';
-import { nostrService } from './nostr-service';
 import {
   addPendingTransaction,
   removePendingTransaction,
@@ -133,20 +132,19 @@ export async function handlePopupMessage(
 
       case 'POPUP_CREATE_WALLET': {
         const password = message.password as string;
-        const walletName = message.walletName as string | undefined;
-        const identityLabel = message.identityLabel as string | undefined;
-        const identity = await walletManager.createWallet(password, walletName, identityLabel);
+        const { identity, mnemonic } = await walletManager.createWallet(password);
         return {
           success: true,
           identity,
+          mnemonic,
           state: await walletManager.getState(),
         };
       }
 
       case 'POPUP_IMPORT_WALLET': {
-        const walletJson = message.walletJson as string;
+        const mnemonic = message.mnemonic as string;
         const password = message.password as string;
-        const identity = await walletManager.importWallet(walletJson, password);
+        const identity = await walletManager.importWallet(mnemonic, password);
         return {
           success: true,
           identity,
@@ -171,38 +169,19 @@ export async function handlePopupMessage(
           state: await walletManager.getState(),
         };
 
+      case 'POPUP_RESET_WALLET':
+        await walletManager.resetWallet();
+        return {
+          success: true,
+          state: await walletManager.getState(),
+        };
+
       case 'POPUP_GET_IDENTITIES':
         return {
           success: true,
           identities: walletManager.listIdentities(),
           activeIdentityId: walletManager.getActiveIdentity().id,
         };
-
-      case 'POPUP_CREATE_IDENTITY': {
-        const label = message.label as string;
-        const identity = await walletManager.createIdentity(label);
-        return {
-          success: true,
-          identity,
-        };
-      }
-
-      case 'POPUP_SWITCH_IDENTITY': {
-        const identityId = message.identityId as string;
-        const identity = await walletManager.switchIdentity(identityId);
-        return {
-          success: true,
-          identity,
-        };
-      }
-
-      case 'POPUP_REMOVE_IDENTITY': {
-        const identityId = message.identityId as string;
-        await walletManager.removeIdentity(identityId);
-        return {
-          success: true,
-        };
-      }
 
       case 'POPUP_GET_BALANCES':
         return {
@@ -214,6 +193,12 @@ export async function handlePopupMessage(
         return {
           success: true,
           walletJson: walletManager.exportWallet(),
+        };
+
+      case 'POPUP_GET_MNEMONIC':
+        return {
+          success: true,
+          mnemonic: walletManager.getMnemonic(),
         };
 
       case 'POPUP_GET_PENDING_TRANSACTIONS':
@@ -271,6 +256,28 @@ export async function handlePopupMessage(
       case 'POPUP_GET_MY_NAMETAG':
         return handlePopupGetMyNametag();
 
+      case 'POPUP_GET_AGGREGATOR_CONFIG':
+        return handlePopupGetAggregatorConfig();
+
+      case 'POPUP_SET_AGGREGATOR_CONFIG': {
+        const config = message.config as { gatewayUrl: string; apiKey?: string };
+        return handlePopupSetAggregatorConfig(config);
+      }
+
+      case 'POPUP_SEND_TOKENS': {
+        const { recipient, coinId, amount } = message as {
+          recipient: string;
+          coinId: string;
+          amount: string;
+        };
+        return handlePopupSendTokens(recipient, coinId, amount);
+      }
+
+      case 'POPUP_RESOLVE_NAMETAG': {
+        const nametag = message.nametag as string;
+        return handlePopupResolveNametag(nametag);
+      }
+
       default:
         return {
           success: false,
@@ -295,7 +302,6 @@ async function handleConnect(origin: string): Promise<{
   error?: string;
 }> {
   if (!walletManager.isUnlocked()) {
-    // Need to open popup for unlock
     await openPopup();
     return {
       type: 'SPHERE_CONNECT_RESPONSE',
@@ -402,7 +408,6 @@ async function handleSendTokensRequest(
     };
   }
 
-  // Create pending transaction for user approval
   const tx: PendingTransaction = {
     requestId,
     type: 'send',
@@ -418,15 +423,11 @@ async function handleSendTokensRequest(
   };
 
   await addPendingTransaction(tx);
-
-  // Open popup for approval
   await openPopup();
 
-  // Return pending - actual result will be sent via transaction result message
   return {
     type: 'SPHERE_SEND_TOKENS_RESPONSE',
     success: true,
-    // transactionId will be sent later via SPHERE_TRANSACTION_RESULT
   };
 }
 
@@ -452,7 +453,6 @@ async function handleSignMessageRequest(
     };
   }
 
-  // Create pending transaction for user approval
   const tx: PendingTransaction = {
     requestId,
     type: 'sign_message',
@@ -525,7 +525,6 @@ async function handleSignNostrEventRequest(
     };
   }
 
-  // Create pending transaction for user approval
   const tx: PendingTransaction = {
     requestId,
     type: 'sign_nostr',
@@ -611,12 +610,11 @@ async function handleCheckNametagAvailable(
   }
 
   try {
-    // If we can't resolve it, it's available
-    const resolution = await walletManager.resolveNametag(nametag);
+    const available = await walletManager.isNametagAvailable(nametag);
     return {
       type: 'SPHERE_CHECK_NAMETAG_AVAILABLE_RESPONSE',
       success: true,
-      available: resolution === null,
+      available,
     };
   } catch (error) {
     return {
@@ -654,36 +652,20 @@ async function handlePopupRegisterNametag(
     return { success: false, error: 'Wallet is locked' };
   }
 
-  if (!nostrService.getIsConnected()) {
-    return { success: false, error: 'NOSTR not connected' };
-  }
-
   try {
-    // Clean the nametag
     const cleanTag = nametag.replace('@', '').trim().toLowerCase();
-
     console.log(`[NametagHandler] Registering nametag: @${cleanTag}`);
 
-    // Register via the mint service (checks availability, publishes binding)
     const result = await nametagMintService.register(cleanTag);
 
     if (result.status === 'error') {
       return { success: false, error: result.message };
     }
 
-    // Save to storage
-    // Note: In Phase 5, we don't have an on-chain token, so tokenJson is empty
-    await walletManager.saveNametag({
-      name: cleanTag,
-      tokenJson: '{}', // Placeholder - on-chain minting in Phase 6+
-      proxyAddress: result.proxyAddress,
-      timestamp: Date.now(),
-    });
-
     const nametagInfo: NametagInfo = {
       nametag: cleanTag,
       proxyAddress: result.proxyAddress,
-      tokenId: '', // Placeholder - on-chain minting in Phase 6+
+      tokenId: '',
       status: 'active',
     };
 
@@ -714,6 +696,73 @@ async function handlePopupGetMyNametag(): Promise<{
     return {
       success: false,
       error: (error as Error).message || 'Failed to get nametag',
+    };
+  }
+}
+
+async function handlePopupGetAggregatorConfig(): Promise<{
+  success: boolean;
+  config?: { gatewayUrl: string; apiKey?: string };
+  error?: string;
+}> {
+  try {
+    const config = await walletManager.getAggregatorConfig();
+    return { success: true, config };
+  } catch (error) {
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to get aggregator config',
+    };
+  }
+}
+
+async function handlePopupSetAggregatorConfig(config: {
+  gatewayUrl: string;
+  apiKey?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    await walletManager.setAggregatorConfig(config);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to set aggregator config',
+    };
+  }
+}
+
+async function handlePopupSendTokens(
+  recipient: string,
+  coinId: string,
+  amount: string
+): Promise<{ success: boolean; transactionId?: string; error?: string }> {
+  try {
+    const result = await walletManager.sendAmount(coinId, amount, recipient);
+    return {
+      success: true,
+      transactionId: result.transactionId,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to send tokens',
+    };
+  }
+}
+
+async function handlePopupResolveNametag(
+  nametag: string
+): Promise<{ success: boolean; resolution?: { nametag: string; pubkey: string; proxyAddress: string } | null; error?: string }> {
+  try {
+    const resolution = await walletManager.resolveNametag(nametag);
+    return {
+      success: true,
+      resolution,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to resolve nametag',
     };
   }
 }
@@ -752,7 +801,6 @@ async function handleApproveTransaction(requestId: string): Promise<{ success: b
       }
     }
 
-    // Send result to content script
     await sendToTab(tx.tabId, {
       type: 'SPHERE_TRANSACTION_RESULT',
       requestId,
@@ -762,7 +810,6 @@ async function handleApproveTransaction(requestId: string): Promise<{ success: b
 
     return { success: true };
   } catch (error) {
-    // Send error to content script
     await sendToTab(tx.tabId, {
       type: 'SPHERE_TRANSACTION_RESULT',
       requestId,
@@ -781,7 +828,6 @@ async function handleRejectTransaction(requestId: string): Promise<{ success: bo
     return { success: false, error: 'Transaction not found' };
   }
 
-  // Send rejection to content script
   await sendToTab(tx.tabId, {
     type: 'SPHERE_TRANSACTION_RESULT',
     requestId,
@@ -794,15 +840,10 @@ async function handleRejectTransaction(requestId: string): Promise<{ success: bo
 
 // ============ Helpers ============
 
-/**
- * Open the extension popup.
- */
 async function openPopup(): Promise<void> {
   try {
     await chrome.action.openPopup();
   } catch {
-    // openPopup may not be available in all contexts
-    // Fall back to creating a new window
     chrome.windows.create({
       url: 'popup.html',
       type: 'popup',
@@ -812,9 +853,6 @@ async function openPopup(): Promise<void> {
   }
 }
 
-/**
- * Send a message to a specific tab.
- */
 async function sendToTab(tabId: number, message: unknown): Promise<void> {
   if (tabId === 0) {
     console.warn('Cannot send to tab 0');
@@ -827,4 +865,3 @@ async function sendToTab(tabId: number, message: unknown): Promise<void> {
     console.error('Failed to send message to tab:', error);
   }
 }
-

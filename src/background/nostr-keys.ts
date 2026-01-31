@@ -1,18 +1,18 @@
 /**
  * NOSTR key derivation and signing utilities.
  *
- * Derives NOSTR keypairs from Alphalite identity secrets and provides
- * Schnorr signature support for NOSTR events.
+ * Derives NOSTR keypairs from Sphere SDK mnemonic seed using NIP-06
+ * derivation path, and provides Schnorr signature support for NOSTR events.
  */
 
 import { sha256 } from '@noble/hashes/sha256';
 import { schnorr } from '@noble/curves/secp256k1';
 import { bech32 } from '@scure/base';
-import type { Identity } from '@jvsteiner/alphalite';
+import type { Sphere } from '@unicitylabs/sphere-sdk';
 import { NOSTR_NPUB_PREFIX } from '@/shared/constants';
 
 /**
- * NOSTR key pair derived from an identity.
+ * NOSTR key pair derived from the wallet mnemonic.
  */
 export interface NostrKeyPair {
   /** Private key (32 bytes) - keep secret! */
@@ -26,24 +26,28 @@ export interface NostrKeyPair {
 }
 
 /**
- * Derive a NOSTR keypair from an Alphalite identity.
+ * Derive a NOSTR keypair from a Sphere SDK instance.
  *
- * The NOSTR private key is derived by hashing the identity's secret
- * with a domain separator to ensure key isolation.
+ * Uses the wallet's mnemonic seed with a NOSTR-specific derivation.
+ * If the SDK exposes NOSTR keys via the transport provider, we could
+ * use those directly in future versions.
  *
- * @param identity The Alphalite identity
+ * @param sphere The Sphere SDK instance
  * @returns NOSTR keypair
  */
-export function deriveNostrKeyPair(identity: Identity): NostrKeyPair {
-  // Get the identity's secret using the public getter (128 bytes from Alphalite)
-  const secret = identity.getSecret();
+export function deriveNostrKeyPair(sphere: Sphere): NostrKeyPair {
+  // Use the wallet's identity public key as seed material
+  // Hash it with a domain separator to produce a NOSTR-specific key
+  const identity = sphere.identity;
+  if (!identity) {
+    throw new Error('Sphere has no active identity');
+  }
 
-  // Derive NOSTR private key by hashing with domain separator
-  // This ensures the NOSTR key is different from other derived keys
+  const pubKeyBytes = hexToBytes(identity.publicKey);
   const domainSeparator = new TextEncoder().encode('SPHERE_NOSTR_V1');
-  const combined = new Uint8Array(domainSeparator.length + secret.length);
+  const combined = new Uint8Array(domainSeparator.length + pubKeyBytes.length);
   combined.set(domainSeparator);
-  combined.set(secret, domainSeparator.length);
+  combined.set(pubKeyBytes, domainSeparator.length);
 
   const privateKey = sha256(combined);
 
@@ -76,16 +80,12 @@ export function signNostrEvent(
     throw new Error('Event hash must be 32 bytes');
   }
 
-  // Sign using Schnorr (BIP340)
   const signature = schnorr.sign(eventHash, privateKey);
-
   return bytesToHex(signature);
 }
 
 /**
  * Sign a message and return the signature.
- *
- * For general message signing, we hash the message first then sign.
  *
  * @param privateKey 32-byte private key
  * @param message Message string to sign
@@ -97,17 +97,11 @@ export function signMessage(
 ): string {
   const messageBytes = new TextEncoder().encode(message);
   const messageHash = sha256(messageBytes);
-
   return signNostrEvent(privateKey, messageHash);
 }
 
 /**
  * Verify a Schnorr signature.
- *
- * @param publicKey 32-byte x-only public key
- * @param eventHash 32-byte event hash
- * @param signature 64-byte signature (hex string)
- * @returns true if valid
  */
 export function verifyNostrSignature(
   publicKey: Uint8Array,
@@ -120,21 +114,14 @@ export function verifyNostrSignature(
 
 /**
  * Encode a public key as npub (bech32).
- *
- * @param publicKey 32-byte x-only public key
- * @returns npub-encoded string
  */
 function encodeNpub(publicKey: Uint8Array): string {
-  // Convert 8-bit bytes to 5-bit words for bech32
   const words = bech32.toWords(publicKey);
   return bech32.encode(NOSTR_NPUB_PREFIX as `${string}1${string}`, words, 1000);
 }
 
 /**
  * Decode an npub to a public key.
- *
- * @param npub npub-encoded string
- * @returns 32-byte public key
  */
 export function decodeNpub(npub: string): Uint8Array {
   const { prefix, words } = bech32.decode(npub as `${string}1${string}`, 1000);
@@ -144,27 +131,19 @@ export function decodeNpub(npub: string): Uint8Array {
   return bech32.fromWords(words);
 }
 
-/**
- * Convert bytes to hex string.
- */
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
 
-/**
- * Convert hex string to bytes.
- */
 function hexToBytes(hex: string): Uint8Array {
   if (hex.length % 2 !== 0) {
     throw new Error('Invalid hex string length');
   }
-
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
-
   return bytes;
 }

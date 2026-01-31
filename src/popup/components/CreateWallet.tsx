@@ -9,8 +9,8 @@ import { useWallet } from '../hooks/useWallet';
 export function CreateWallet() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [walletName, setWalletName] = useState('');
   const [error, setError] = useState('');
+  const [mnemonic, setMnemonic] = useState<string | null>(null);
   const { loading, setView } = useStore();
   const { createWallet } = useWallet();
 
@@ -29,32 +29,46 @@ export function CreateWallet() {
     }
 
     try {
-      await createWallet(password, walletName || undefined);
+      const m = await createWallet(password);
+      setMnemonic(m);
     } catch (err) {
       setError((err as Error).message);
     }
   };
+
+  // Show mnemonic backup screen after wallet creation
+  if (mnemonic) {
+    return (
+      <div className="p-4">
+        <h2 className="text-xl font-semibold mb-4">Backup Recovery Phrase</h2>
+
+        <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4 mb-4">
+          <p className="text-sm text-yellow-400 mb-3">
+            Write down these words in order and store them safely.
+            Anyone with this phrase can access your wallet.
+          </p>
+          <div className="bg-gray-900 rounded-lg p-3 font-mono text-sm text-gray-200 break-all leading-relaxed">
+            {mnemonic}
+          </div>
+        </div>
+
+        <button
+          onClick={() => setView('dashboard')}
+          className="w-full bg-purple-600 hover:bg-purple-700
+                     text-white font-medium py-2 px-4 rounded-lg
+                     transition-colors"
+        >
+          I've Saved My Recovery Phrase
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4">
       <h2 className="text-xl font-semibold mb-6">Create New Wallet</h2>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">
-            Wallet Name (optional)
-          </label>
-          <input
-            type="text"
-            value={walletName}
-            onChange={(e) => setWalletName(e.target.value)}
-            placeholder="My Sphere Wallet"
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2
-                       text-white placeholder-gray-500
-                       focus:outline-none focus:border-purple-500"
-          />
-        </div>
-
         <div>
           <label className="block text-sm text-gray-400 mb-1">
             Password

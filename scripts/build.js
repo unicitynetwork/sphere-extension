@@ -4,6 +4,7 @@
  */
 
 import { build } from 'vite';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { copyFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync, statSync } from 'fs';
@@ -72,6 +73,17 @@ async function buildExtension() {
   await build({
     configFile: false,
     publicDir: false,
+    plugins: [
+      nodePolyfills({
+        // Enable polyfills for crypto and zlib used by nostr-js-sdk
+        include: ['crypto', 'buffer', 'stream', 'zlib', 'vm'],
+        globals: {
+          Buffer: true,
+          global: true,
+          process: true,
+        },
+      }),
+    ],
     resolve: {
       alias: {
         '@/background': resolve(root, 'src/background'),
