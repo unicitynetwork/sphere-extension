@@ -148,7 +148,7 @@ class SphereAPI {
 
   /**
    * Sign a NOSTR event hash.
-   * Opens popup for user approval.
+   * Auto-approved for connected sites (no popup).
    */
   async signNostrEvent(eventHash: string): Promise<string> {
     const response = await this.createRequest<{ signature: string }>('SPHERE_SIGN_NOSTR_EVENT', { eventHash });

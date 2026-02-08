@@ -659,11 +659,11 @@ async function handleNip44Decrypt(
 }
 
 async function handleSignNostrEventRequest(
-  requestId: string,
+  _requestId: string,
   origin: string,
-  tabId: number,
+  _tabId: number,
   eventHash: string
-): Promise<{ type: string; success: boolean; error?: string }> {
+): Promise<{ type: string; success: boolean; signature?: string; error?: string }> {
   if (!connectedSites.has(origin)) {
     return {
       type: 'SPHERE_SIGN_NOSTR_EVENT_RESPONSE',
@@ -680,22 +680,20 @@ async function handleSignNostrEventRequest(
     };
   }
 
-  const tx: PendingTransaction = {
-    requestId,
-    type: 'sign_nostr',
-    origin,
-    tabId,
-    timestamp: Date.now(),
-    data: { eventHash } as SignNostrData,
-  };
-
-  await addPendingTransaction(tx);
-  await openPopup();
-
-  return {
-    type: 'SPHERE_SIGN_NOSTR_EVENT_RESPONSE',
-    success: true,
-  };
+  try {
+    const signature = walletManager.signNostrEventHash(eventHash);
+    return {
+      type: 'SPHERE_SIGN_NOSTR_EVENT_RESPONSE',
+      success: true,
+      signature,
+    };
+  } catch (error) {
+    return {
+      type: 'SPHERE_SIGN_NOSTR_EVENT_RESPONSE',
+      success: false,
+      error: (error as Error).message || 'Failed to sign event',
+    };
+  }
 }
 
 async function handleResolveNametag(
