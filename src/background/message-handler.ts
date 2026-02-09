@@ -462,7 +462,11 @@ async function handleSendTokensRequest(
   origin: string,
   tabId: number,
   params: { recipient: string; coinId: string; amount: string; message?: string }
-): Promise<{ type: string; success: boolean; error?: string }> {
+): Promise<{ type: string; success?: boolean; pending?: boolean; error?: string }> {
+  console.log('[SendTokens] Request:', { requestId, origin, tabId, params });
+  console.log('[SendTokens] connectedSites has origin:', connectedSites.has(origin));
+  console.log('[SendTokens] wallet unlocked:', walletManager.isUnlocked());
+
   if (!connectedSites.has(origin)) {
     return {
       type: 'SPHERE_SEND_TOKENS_RESPONSE',
@@ -494,11 +498,15 @@ async function handleSendTokensRequest(
   };
 
   await addPendingTransaction(tx);
+  console.log('[SendTokens] Pending tx added, opening popup...');
   await openPopup();
+  console.log('[SendTokens] openPopup returned, sending pending response');
 
+  // Return pending (not success) — the real result comes via SPHERE_TRANSACTION_RESULT
+  // after the user approves or rejects in the popup.
   return {
     type: 'SPHERE_SEND_TOKENS_RESPONSE',
-    success: true,
+    pending: true,
   };
 }
 
@@ -507,7 +515,7 @@ async function handleSignMessageRequest(
   origin: string,
   tabId: number,
   message: string
-): Promise<{ type: string; success: boolean; error?: string }> {
+): Promise<{ type: string; success?: boolean; pending?: boolean; error?: string }> {
   if (!connectedSites.has(origin)) {
     return {
       type: 'SPHERE_SIGN_MESSAGE_RESPONSE',
@@ -536,9 +544,10 @@ async function handleSignMessageRequest(
   await addPendingTransaction(tx);
   await openPopup();
 
+  // Return pending — the real result comes via SPHERE_TRANSACTION_RESULT after approval.
   return {
     type: 'SPHERE_SIGN_MESSAGE_RESPONSE',
-    success: true,
+    pending: true,
   };
 }
 
@@ -1037,12 +1046,16 @@ async function openPopup(): Promise<void> {
   try {
     await chrome.action.openPopup();
   } catch {
-    chrome.windows.create({
-      url: 'popup.html',
-      type: 'popup',
-      width: 380,
-      height: 600,
-    });
+    try {
+      await chrome.windows.create({
+        url: 'popup.html',
+        type: 'popup',
+        width: 380,
+        height: 600,
+      });
+    } catch (e2) {
+      console.error('[openPopup] Failed:', (e2 as Error).message);
+    }
   }
 }
 

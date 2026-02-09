@@ -43,7 +43,7 @@ export function deriveNostrKeyPair(sphere: Sphere): NostrKeyPair {
     throw new Error('Sphere has no active identity');
   }
 
-  const pubKeyBytes = hexToBytes(identity.publicKey);
+  const pubKeyBytes = hexToBytes(identity.chainPubkey);
   const domainSeparator = new TextEncoder().encode('SPHERE_NOSTR_V1');
   const combined = new Uint8Array(domainSeparator.length + pubKeyBytes.length);
   combined.set(domainSeparator);

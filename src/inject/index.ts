@@ -56,14 +56,14 @@ class SphereAPI {
     });
   }
 
-  private createRequest<T>(type: string, data: Record<string, unknown> = {}): Promise<T> {
+  private createRequest<T>(type: string, data: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
     const requestId = generateRequestId();
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error('Request timeout'));
-      }, REQUEST_TIMEOUT);
+      }, timeoutMs ?? REQUEST_TIMEOUT);
 
       this.pendingRequests.set(requestId, { resolve: resolve as (value: unknown) => void, reject, timeout });
 
@@ -117,7 +117,8 @@ class SphereAPI {
 
   /**
    * Send tokens to a recipient.
-   * Opens popup for user approval.
+   * Opens popup for user approval. Waits for the actual transaction result
+   * (up to 5 minutes) rather than resolving when the popup opens.
    */
   async sendTokens(params: {
     recipient: string;
@@ -125,17 +126,23 @@ class SphereAPI {
     amount: string;
     message?: string;
   }): Promise<{ transactionId: string }> {
-    const response = await this.createRequest<{ transactionId: string }>('SPHERE_SEND_TOKENS', params);
-    return { transactionId: response.transactionId };
+    const response = await this.createRequest<{
+      result?: { transactionId: string };
+      transactionId?: string;
+    }>('SPHERE_SEND_TOKENS', params, 5 * 60 * 1000);
+    return { transactionId: response.result?.transactionId || response.transactionId || '' };
   }
 
   /**
    * Sign an arbitrary message.
-   * Opens popup for user approval.
+   * Opens popup for user approval. Waits for approval result (up to 5 minutes).
    */
   async signMessage(message: string): Promise<string> {
-    const response = await this.createRequest<{ signature: string }>('SPHERE_SIGN_MESSAGE', { message });
-    return response.signature;
+    const response = await this.createRequest<{
+      result?: { signature: string };
+      signature?: string;
+    }>('SPHERE_SIGN_MESSAGE', { message }, 5 * 60 * 1000);
+    return response.result?.signature || response.signature || '';
   }
 
   /**

@@ -15,7 +15,7 @@
     "@noble/hashes": "^1.4.0",
     "@scure/base": "^1.1.0",
     "@tailwindcss/postcss": "^4.1.18",
-    "@unicitylabs/sphere-sdk": "*",
+    "@unicitylabs/sphere-sdk": "^0.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.0"

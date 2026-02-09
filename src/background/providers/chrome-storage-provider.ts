@@ -4,7 +4,7 @@
  * Service workers have no localStorage, so we use chrome.storage.local instead.
  */
 
-import type { StorageProvider, ProviderStatus } from '@unicitylabs/sphere-sdk';
+import type { StorageProvider, ProviderStatus, FullIdentity, TrackedAddressEntry } from '@unicitylabs/sphere-sdk';
 
 // =============================================================================
 // Configuration
@@ -70,9 +70,9 @@ export class ChromeStorageProvider implements StorageProvider {
   // StorageProvider Implementation
   // ===========================================================================
 
-  setIdentity(identity: { address: string }): void {
-    this.address = identity.address;
-    this.log('Identity set:', identity.address);
+  setIdentity(identity: FullIdentity): void {
+    this.address = identity.l1Address;
+    this.log('Identity set:', identity.l1Address);
   }
 
   async get(key: string): Promise<string | null> {
@@ -124,6 +124,16 @@ export class ChromeStorageProvider implements StorageProvider {
     for (const key of keysToRemove) {
       await this.remove(key);
     }
+  }
+
+  async saveTrackedAddresses(entries: TrackedAddressEntry[]): Promise<void> {
+    await this.set('tracked_addresses', JSON.stringify(entries));
+  }
+
+  async loadTrackedAddresses(): Promise<TrackedAddressEntry[]> {
+    const data = await this.get('tracked_addresses');
+    if (!data) return [];
+    return JSON.parse(data) as TrackedAddressEntry[];
   }
 
   // ===========================================================================

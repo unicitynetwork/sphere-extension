@@ -44,6 +44,10 @@ window.addEventListener('message', async (event) => {
 
     console.log('Content script received response:', response);
 
+    // Don't forward "pending" responses — the inject should wait for SPHERE_TRANSACTION_RESULT
+    // which arrives later via chrome.runtime.onMessage after user approves/rejects.
+    if (response.pending) return;
+
     // Send response back to page
     window.postMessage({
       ...response,

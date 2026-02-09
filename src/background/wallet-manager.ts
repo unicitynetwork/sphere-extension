@@ -104,7 +104,7 @@ export class WalletManager {
     return {
       hasWallet: !!result[ENCRYPTED_MNEMONIC_KEY],
       isUnlocked: this.sphere !== null,
-      activeIdentityId: this.sphere?.identity?.address ?? null,
+      activeIdentityId: this.sphere?.identity?.l1Address ?? null,
     };
   }
 
@@ -176,18 +176,33 @@ export class WalletManager {
     // Set up incoming transfer listener
     this.setupTransferListener();
 
-    // Log identity info for debugging token receiving
+    // Log identity + payment state for debugging
     const identity = this.sphere.identity;
-    console.log('[WalletManager] Wallet unlocked. Identity address:', identity?.address);
-    console.log('[WalletManager] Identity publicKey:', identity?.publicKey);
+    console.log('[WalletManager] Wallet unlocked. Identity address:', identity?.l1Address);
+    console.log('[WalletManager] Identity directAddress:', identity?.directAddress);
     try {
-      const transport = (this.sphere as any).getTransport();
+      const transport = (this.sphere as any).getTransport?.() ?? (this.sphere as any)._transport;
       if (transport?.getNostrPubkey) {
-        console.log('[WalletManager] Transport NOSTR pubkey (sender must target this):', transport.getNostrPubkey());
+        console.log('[WalletManager] Transport Nostr pubkey:', transport.getNostrPubkey());
+      }
+      console.log('[WalletManager] Transport connected:', transport?.isConnected?.());
+    } catch (e) {
+      console.log('[WalletManager] Could not read transport info:', e);
+    }
+    // Check if nametag token is loaded (required for receiving PROXY transfers)
+    try {
+      const hasNametag = (this.sphere as any)._payments?.hasNametag?.() ?? false;
+      const nametagData = (this.sphere as any)._payments?.getNametag?.();
+      console.log('[WalletManager] Nametag loaded:', hasNametag, nametagData ? `name=${nametagData.name}` : '(none)');
+      if (!hasNametag) {
+        console.warn('[WalletManager] WARNING: No nametag token loaded — PROXY transfers will be rejected');
       }
     } catch (e) {
-      console.log('[WalletManager] Could not read transport pubkey:', e);
+      console.log('[WalletManager] Could not check nametag state:', e);
     }
+
+    // Verify nametag binding points to our current transport pubkey
+    this.verifyNametagBinding().catch(() => {});
 
     return this.getActiveIdentity();
   }
@@ -295,9 +310,9 @@ export class WalletManager {
     }
 
     return {
-      id: identity.address,
+      id: identity.l1Address,
       label: identity.nametag ? `@${identity.nametag}` : 'Default',
-      publicKey: identity.publicKey,
+      publicKey: identity.chainPubkey,
       createdAt: new Date().toISOString(),
     };
   }
@@ -316,37 +331,36 @@ export class WalletManager {
     const balances: TokenBalance[] = [];
 
     try {
-      // Get all balances from the SDK
-      const sdkBalances = sphere.payments.getBalance();
-
-      if (sdkBalances.length > 0) {
-        for (const bal of sdkBalances) {
-          console.log('[WalletManager] SDK balance:', JSON.stringify(bal));
-          const decimals = COIN_DECIMALS[bal.coinId] ?? bal.decimals ?? DEFAULT_DECIMALS;
-          const formatted = formatSmallestUnits(bal.totalAmount, decimals);
-          console.log('[WalletManager] Formatted:', bal.coinId.slice(0, 8), formatted, 'decimals:', decimals);
-          // Skip zero-balance unknown tokens
-          if (formatted === '0' && !COIN_SYMBOLS[bal.coinId]) continue;
-          balances.push({
-            coinId: bal.coinId,
-            symbol: COIN_SYMBOLS[bal.coinId] || bal.symbol || 'TOKEN',
-            amount: formatted,
+      // Get confirmed tokens grouped by coinId
+      const tokens = sphere.payments.getTokens({ status: 'confirmed' });
+      // Aggregate by coinId
+      const byCoin = new Map<string, { symbol: string; total: bigint; decimals: number }>();
+      for (const tok of tokens) {
+        const existing = byCoin.get(tok.coinId);
+        if (existing) {
+          existing.total += BigInt(tok.amount);
+        } else {
+          byCoin.set(tok.coinId, {
+            symbol: COIN_SYMBOLS[tok.coinId] || tok.symbol || 'TOKEN',
+            total: BigInt(tok.amount),
+            decimals: COIN_DECIMALS[tok.coinId] ?? tok.decimals ?? DEFAULT_DECIMALS,
           });
         }
+      }
+
+      if (byCoin.size > 0) {
+        for (const [coinId, info] of byCoin) {
+          const formatted = formatSmallestUnits(info.total.toString(), info.decimals);
+          console.log('[WalletManager] Formatted:', coinId.slice(0, 8), formatted, 'decimals:', info.decimals);
+          if (formatted === '0' && !COIN_SYMBOLS[coinId]) continue;
+          balances.push({ coinId, symbol: info.symbol, amount: formatted });
+        }
       } else {
-        balances.push({
-          coinId: ALPHA_COIN_ID,
-          symbol: 'UCT',
-          amount: '0',
-        });
+        balances.push({ coinId: ALPHA_COIN_ID, symbol: 'UCT', amount: '0' });
       }
     } catch (error) {
       console.error('[WalletManager] Error getting balances:', error);
-      balances.push({
-        coinId: ALPHA_COIN_ID,
-        symbol: 'UCT',
-        amount: '0',
-      });
+      balances.push({ coinId: ALPHA_COIN_ID, symbol: 'UCT', amount: '0' });
     }
 
     return balances;
@@ -355,11 +369,12 @@ export class WalletManager {
   getBalance(coinId: string): bigint {
     const sphere = this.getSphere();
     try {
-      const sdkBalances = sphere.payments.getBalance(coinId);
-      if (sdkBalances.length > 0) {
-        return BigInt(sdkBalances[0].totalAmount);
+      const tokens = sphere.payments.getTokens({ coinId, status: 'confirmed' });
+      let total = 0n;
+      for (const tok of tokens) {
+        total += BigInt(tok.amount);
       }
-      return 0n;
+      return total;
     } catch {
       return 0n;
     }
@@ -373,7 +388,7 @@ export class WalletManager {
 
   async getAddress(): Promise<string> {
     const sphere = this.getSphere();
-    return sphere.identity?.address ?? '';
+    return sphere.identity?.l1Address ?? '';
   }
 
   // ============ Token Operations ============
@@ -533,7 +548,7 @@ export class WalletManager {
 
     const nametagInfo: NametagInfo = {
       nametag: cleanTag,
-      proxyAddress: sphere.identity?.predicateAddress ?? '',
+      proxyAddress: sphere.identity?.directAddress ?? '',
       tokenId: '',
       status: 'active',
     };
@@ -576,6 +591,114 @@ export class WalletManager {
     };
   }
 
+  // ============ Nametag Binding Verification ============
+
+  /**
+   * Check that our nametag on the relay resolves to our current transport pubkey.
+   * If there's a mismatch (e.g. SDK upgrade changed key derivation), transfers
+   * sent to @nametag will target the old pubkey and we'll never see them.
+   */
+  private async verifyNametagBinding(): Promise<void> {
+    const sphere = this.sphere;
+    if (!sphere) return;
+
+    const stored = await this.getStoredNametag();
+    if (!stored?.name) return;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const transport = sphere.getTransport() as any;
+      const myTransportPubkey: string = transport.getNostrPubkey();
+
+      const resolved: string | null = await transport.resolveNametag(stored.name);
+      if (!resolved) {
+        console.warn(`[WalletManager] Nametag @${stored.name} not found on relay`);
+        return;
+      }
+
+      if (resolved === myTransportPubkey) {
+        console.log(`[WalletManager] Nametag @${stored.name} binding OK — matches transport pubkey`);
+        // Binding is fine, but still check if the on-chain token needs re-minting
+        await this.ensureNametagTokenMigrated(stored.name);
+        return;
+      }
+
+      console.error(`[WalletManager] NAMETAG BINDING MISMATCH!`);
+      console.error(`[WalletManager]   Relay binding pubkey: ${resolved}`);
+      console.error(`[WalletManager]   Our transport pubkey: ${myTransportPubkey}`);
+      console.error(`[WalletManager]   SDK upgrade changed identity key derivation — full re-registration needed`);
+
+      // Step 1: Re-register Nostr binding with new transport pubkey
+      console.log(`[WalletManager] Step 1: Re-registering Nostr binding for @${stored.name}...`);
+      const directAddress = sphere.identity?.directAddress ?? '';
+      const origResolve = transport.resolveNametag.bind(transport);
+      transport.resolveNametag = async () => null;
+      try {
+        const result = await transport.registerNametag(stored.name, '', directAddress);
+        if (result) {
+          console.log(`[WalletManager] Nostr binding updated successfully`);
+        } else {
+          console.error(`[WalletManager] Failed to update Nostr binding`);
+          return;
+        }
+      } finally {
+        transport.resolveNametag = origResolve;
+      }
+
+      // Step 2: Clear old nametag token and re-mint with new identity
+      // The old token was minted with old identity's signing predicates — PROXY
+      // finalization will fail with "Recipient verification failed" until re-minted.
+      console.log(`[WalletManager] Step 2: Re-minting nametag token with new identity...`);
+      const payments = (sphere as any)._payments;
+      if (payments?.clearNametag) {
+        await payments.clearNametag();
+        console.log(`[WalletManager] Old nametag token cleared`);
+      }
+      const mintResult = await sphere.mintNametag(stored.name);
+      if (mintResult.success) {
+        console.log(`[WalletManager] Nametag token re-minted successfully with new identity`);
+      } else {
+        console.error(`[WalletManager] Nametag re-mint failed:`, mintResult.error);
+        console.error(`[WalletManager] PROXY transfers will fail until nametag is re-minted`);
+      }
+    } catch (e) {
+      console.warn('[WalletManager] Nametag binding verification failed:', e);
+    }
+  }
+
+  /**
+   * One-time migration: re-mint nametag token if it was created by old SDK identity.
+   * The old token has predicates from the old key derivation, so PROXY finalization
+   * fails with "Recipient verification failed".
+   */
+  private async ensureNametagTokenMigrated(nametagName: string): Promise<void> {
+    const FLAG_KEY = 'nametag_token_migrated_v1';
+    const flagResult = await chrome.storage.local.get(FLAG_KEY);
+    if (flagResult[FLAG_KEY]) return; // Already migrated
+
+    const sphere = this.sphere;
+    if (!sphere) return;
+
+    console.log(`[WalletManager] Nametag token migration: clearing old token and re-minting @${nametagName}...`);
+
+    // Clear old nametag token (minted with old identity's predicates)
+    const payments = (sphere as any)._payments;
+    if (payments?.clearNametag) {
+      await payments.clearNametag();
+      console.log(`[WalletManager] Old nametag token cleared from payments module`);
+    }
+
+    // Re-mint with current identity
+    const mintResult = await sphere.mintNametag(nametagName);
+    if (mintResult.success) {
+      console.log(`[WalletManager] Nametag token re-minted successfully`);
+      await chrome.storage.local.set({ [FLAG_KEY]: Date.now() });
+    } else {
+      console.error(`[WalletManager] Nametag token re-mint failed:`, mintResult.error);
+      console.error(`[WalletManager] PROXY transfers will continue to fail until re-minted`);
+    }
+  }
+
   // ============ Sphere Instance Creation ============
 
   private async createSphereFromMnemonic(mnemonic: string): Promise<Sphere> {
@@ -608,6 +731,37 @@ export class WalletManager {
       tokenStorage,
     });
 
+    // Migrate data from old address format if needed (SDK 0.1.2 → 0.1.9 changed address encoding)
+    const tokens = sphere.payments.getTokens({ status: 'confirmed' });
+    if (tokens.length === 0) {
+      const newAddress = sphere.identity?.l1Address;
+      const directAddress = sphere.identity?.directAddress;
+      if (newAddress && directAddress) {
+        const chrMigrated = await migrateOldChromeStorageData(newAddress);
+        const idbMigrated = await migrateOldIndexedDBData(directAddress);
+        if (chrMigrated || idbMigrated) {
+          console.log('[WalletManager] Migrated old data, destroying first sphere and reloading...');
+          // Destroy first instance to clean up transport handlers before re-init
+          try { await sphere.destroy(); } catch { /* ignore */ }
+          // Re-create providers (transport was disconnected by destroy)
+          const storage2 = createChromeStorageProvider({ prefix: 'sphere_sdk2_', debug: true });
+          await storage2.connect();
+          const transport2 = createNostrTransportProvider({ relays: DEFAULT_NOSTR_RELAYS, debug: true });
+          const oracle2 = createUnicityAggregatorProvider({
+            url: gatewayUrl,
+            apiKey: config?.apiKey,
+            trustBaseUrl: 'https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/bft-trustbase.testnet.json',
+            debug: true,
+          });
+          const tokenStorage2 = createIndexedDBTokenStorageProvider();
+          const { sphere: reloaded } = await Sphere.init({
+            mnemonic, storage: storage2, transport: transport2, oracle: oracle2, tokenStorage: tokenStorage2,
+          });
+          return reloaded;
+        }
+      }
+    }
+
     return sphere;
   }
 
@@ -617,8 +771,12 @@ export class WalletManager {
     if (!this.sphere) return;
 
     this.sphere.on('transfer:incoming', (data: unknown) => {
-      console.log('[WalletManager] Incoming transfer:', data);
-      // Balance updates automatically via SDK
+      console.log('[WalletManager] Incoming transfer received:', JSON.stringify(data, null, 2));
+    });
+
+    // Also listen for connection changes to detect transport drops
+    this.sphere.on('connection:changed', (data: unknown) => {
+      console.log('[WalletManager] Connection changed:', data);
     });
 
     console.log('[WalletManager] Transfer listener configured');
@@ -659,6 +817,150 @@ function hexToBytes(hex: string): Uint8Array {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return bytes;
+}
+
+// ============ Storage Migration (SDK 0.1.2 → 0.1.9) ============
+// SDK 0.1.2 used hex address (alpha184e7e30...), SDK 0.1.9 uses bech32 (alpha1qm0k2a...).
+// Data lives in both chrome.storage.local AND IndexedDB, keyed by the old address.
+
+const STORAGE_PREFIX = 'sphere_sdk2_';
+const TOKEN_DB_PREFIX = 'sphere-token-storage';
+const TOKEN_STORES = ['tokens', 'meta'];
+
+/** Match SDK's getAddressId() logic for the new DB name suffix */
+function getAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  return `DIRECT_${hash.slice(0, 6).toLowerCase()}_${hash.slice(-6).toLowerCase()}`;
+}
+
+// --- Chrome Storage migration ---
+
+async function migrateOldChromeStorageData(newAddress: string): Promise<boolean> {
+  try {
+    const allData = await chrome.storage.local.get(null);
+    const allKeys = Object.keys(allData);
+    const newPrefix = `${STORAGE_PREFIX}${newAddress}_`;
+
+    // Already migrated?
+    if (allKeys.some(k => k.startsWith(newPrefix) && k.endsWith('_sphere_tokens'))) return false;
+
+    const oldTokenKey = allKeys.find(k =>
+      k.startsWith(STORAGE_PREFIX) && k.endsWith('_sphere_tokens') && !k.startsWith(newPrefix)
+    );
+    if (!oldTokenKey) return false;
+
+    const oldPrefix = oldTokenKey.replace(/sphere_tokens$/, '');
+    console.log(`[WalletManager] Chrome migration: ${oldPrefix} → ${newPrefix}`);
+
+    const toWrite: Record<string, unknown> = {};
+    let count = 0;
+    for (const key of allKeys) {
+      if (key.startsWith(oldPrefix)) {
+        const suffix = key.slice(oldPrefix.length);
+        toWrite[`${newPrefix}${suffix}`] = allData[key];
+        count++;
+        console.log(`[WalletManager]   chrome: ${suffix}`);
+      }
+    }
+    if (count === 0) return false;
+
+    console.log(`[WalletManager] Chrome migration: ${count} keys`);
+    await chrome.storage.local.set(toWrite);
+    return true;
+  } catch (err) {
+    console.warn('[WalletManager] Chrome storage migration failed:', err);
+    return false;
+  }
+}
+
+// --- IndexedDB migration ---
+
+function openIDB(name: string): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(name, 1);
+    req.onupgradeneeded = () => {
+      for (const s of TOKEN_STORES) {
+        if (!req.result.objectStoreNames.contains(s)) req.result.createObjectStore(s);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbReadAll(db: IDBDatabase, store: string): Promise<{ key: IDBValidKey; value: unknown }[]> {
+  return new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(store)) { resolve([]); return; }
+    const tx = db.transaction(store, 'readonly');
+    const s = tx.objectStore(store);
+    const out: { key: IDBValidKey; value: unknown }[] = [];
+    const cur = s.openCursor();
+    cur.onsuccess = () => { const c = cur.result; if (c) { out.push({ key: c.key, value: c.value }); c.continue(); } else resolve(out); };
+    cur.onerror = () => reject(cur.error);
+  });
+}
+
+function idbWriteAll(db: IDBDatabase, store: string, records: { key: IDBValidKey; value: unknown }[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (records.length === 0 || !db.objectStoreNames.contains(store)) { resolve(); return; }
+    const tx = db.transaction(store, 'readwrite');
+    const s = tx.objectStore(store);
+    // Use put(value) for stores with in-line keys (keyPath), put(value, key) for out-of-line
+    const hasKeyPath = s.keyPath !== null;
+    for (const r of records) {
+      if (hasKeyPath) s.put(r.value);
+      else s.put(r.value, r.key);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function migrateOldIndexedDBData(directAddress: string): Promise<boolean> {
+  try {
+    const newAddressId = getAddressId(directAddress);
+    const newDbName = `${TOKEN_DB_PREFIX}-${newAddressId}`;
+
+    // Find old per-address DB by listing all databases
+    if (typeof indexedDB.databases !== 'function') return false;
+    const dbs = await indexedDB.databases();
+    const oldDb = dbs.find(d =>
+      d.name && d.name.startsWith(TOKEN_DB_PREFIX) && d.name !== newDbName && d.name !== TOKEN_DB_PREFIX
+    );
+    if (!oldDb?.name) {
+      console.log('[WalletManager] No old per-address IndexedDB found');
+      return false;
+    }
+
+    console.log(`[WalletManager] IDB migration: ${oldDb.name} → ${newDbName}`);
+
+    const src = await openIDB(oldDb.name);
+    let total = 0;
+    const allData: Record<string, { key: IDBValidKey; value: unknown }[]> = {};
+    for (const store of TOKEN_STORES) {
+      const records = await idbReadAll(src, store);
+      allData[store] = records;
+      total += records.length;
+      console.log(`[WalletManager]   idb ${store}: ${records.length} records`);
+    }
+    src.close();
+
+    if (total === 0) return false;
+
+    const dst = await openIDB(newDbName);
+    for (const store of TOKEN_STORES) {
+      await idbWriteAll(dst, store, allData[store]);
+    }
+    dst.close();
+
+    console.log(`[WalletManager] IDB migration: ${total} records copied`);
+    return true;
+  } catch (err) {
+    console.warn('[WalletManager] IndexedDB migration failed:', err);
+    return false;
+  }
 }
 
 // Singleton instance
