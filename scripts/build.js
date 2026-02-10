@@ -85,6 +85,7 @@ async function buildExtension() {
       }),
     ],
     resolve: {
+      preserveSymlinks: true,
       alias: {
         '@/background': resolve(root, 'src/background'),
         '@/content': resolve(root, 'src/content'),
@@ -119,6 +120,7 @@ async function buildExtension() {
     configFile: false,
     publicDir: false,
     resolve: {
+      preserveSymlinks: true,
       alias: {
         '@/background': resolve(root, 'src/background'),
         '@/content': resolve(root, 'src/content'),
@@ -153,6 +155,7 @@ async function buildExtension() {
     configFile: false,
     publicDir: false,
     resolve: {
+      preserveSymlinks: true,
       alias: {
         '@/background': resolve(root, 'src/background'),
         '@/content': resolve(root, 'src/content'),

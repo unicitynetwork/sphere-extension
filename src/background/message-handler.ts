@@ -331,6 +331,16 @@ export async function handlePopupMessage(
         return handlePopupResolveNametag(nametag);
       }
 
+      case 'POPUP_CHECK_TOKEN_HEALTH': {
+        const result = await walletManager.checkTokenHealth();
+        return { success: true, ...result };
+      }
+
+      case 'POPUP_PURGE_INVALID_TOKENS': {
+        const result = await walletManager.purgeInvalidTokens();
+        return { success: true, ...result };
+      }
+
       default:
         return {
           success: false,

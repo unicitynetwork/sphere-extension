@@ -8,6 +8,7 @@ import type {
   WalletState,
   IdentityInfo,
   TokenBalance,
+  TokenHealthResult,
   PendingTransaction,
   NametagInfo,
   AggregatorConfig,
@@ -469,6 +470,22 @@ export function useWallet() {
     [setLoading, setError, loadWalletData]
   );
 
+  // ============ Token Health ============
+
+  const checkTokenHealth = useCallback(async (): Promise<TokenHealthResult> => {
+    return await sendMessage<TokenHealthResult>({
+      type: 'POPUP_CHECK_TOKEN_HEALTH',
+    });
+  }, []);
+
+  const purgeInvalidTokens = useCallback(async (): Promise<{ purged: number }> => {
+    const result = await sendMessage<{ purged: number }>({
+      type: 'POPUP_PURGE_INVALID_TOKENS',
+    });
+    await loadWalletData();
+    return result;
+  }, [loadWalletData]);
+
   const resolveNametag = useCallback(
     async (nametag: string): Promise<{ nametag: string; pubkey: string; proxyAddress: string } | null> => {
       try {
@@ -504,6 +521,9 @@ export function useWallet() {
     registerNametag,
     getMyNametag,
     resolveNametag,
+    // Token health
+    checkTokenHealth,
+    purgeInvalidTokens,
     // Send operations
     sendTokens,
     // Aggregator config

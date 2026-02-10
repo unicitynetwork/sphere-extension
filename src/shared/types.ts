@@ -104,6 +104,24 @@ export interface SignNostrData {
   eventHash: string;
 }
 
+// ============ Token Health Types ============
+
+export interface TokenHealthInfo {
+  id: string;
+  coinId: string;
+  symbol: string;
+  amount: string;
+  status: string;
+  isValid: boolean;
+  reason?: string;
+}
+
+export interface TokenHealthResult {
+  total: number;
+  valid: number;
+  invalid: TokenHealthInfo[];
+}
+
 // ============ Storage Schema Types ============
 
 export interface StorageSchema {
@@ -202,7 +220,9 @@ export type PopupMessageType =
   | 'POPUP_GET_AGGREGATOR_CONFIG'
   | 'POPUP_SET_AGGREGATOR_CONFIG'
   | 'POPUP_SEND_TOKENS'
-  | 'POPUP_RESOLVE_NAMETAG';
+  | 'POPUP_RESOLVE_NAMETAG'
+  | 'POPUP_CHECK_TOKEN_HEALTH'
+  | 'POPUP_PURGE_INVALID_TOKENS';
 
 // ============ Request/Response Types ============
 

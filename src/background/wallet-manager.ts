@@ -22,6 +22,8 @@ import { createChromeStorageProvider } from './providers';
 import type {
   IdentityInfo,
   TokenBalance,
+  TokenHealthInfo,
+  TokenHealthResult,
   WalletState,
   SendTokensResult,
   NametagResolution,
@@ -31,6 +33,8 @@ import type {
 } from '@/shared/types';
 import { COIN_SYMBOLS, COIN_DECIMALS, DEFAULT_DECIMALS, ALPHA_COIN_ID, GATEWAY_URL, DEFAULT_NOSTR_RELAYS } from '@/shared/constants';
 import { deriveNostrKeyPair, signNostrEvent, signMessage } from './nostr-keys';
+import { Token as SdkToken } from '@unicitylabs/state-transition-sdk/lib/token/Token';
+import { PredicateEngineService } from '@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService';
 
 // Storage key for the encrypted mnemonic
 const ENCRYPTED_MNEMONIC_KEY = 'encryptedMnemonic';
@@ -382,6 +386,83 @@ export class WalletManager {
 
   canAfford(coinId: string, amount: bigint): boolean {
     return this.getBalance(coinId) >= amount;
+  }
+
+  // ============ Token Health ============
+
+  async checkTokenHealth(): Promise<TokenHealthResult> {
+    const sphere = this.getSphere();
+    const allTokens = sphere.payments.getTokens();
+    const oracle = (sphere as any).getOracle?.() ?? (sphere as any)._oracle;
+    const validTokens: typeof allTokens = [];
+    const invalidTokens: { token: typeof allTokens[0]; reason: string }[] = [];
+
+    // Get wallet's signing public key for ownership check via public SDK API
+    let walletPubkey: Uint8Array | null = null;
+    try {
+      walletPubkey = await sphere.payments.getSigningPublicKey();
+    } catch (e) {
+      console.warn('[WalletManager] Could not get signing pubkey:', e);
+    }
+
+    for (const token of allTokens) {
+      try {
+        const tokenData = token.sdkData ? JSON.parse(token.sdkData) : null;
+        if (!tokenData) {
+          invalidTokens.push({ token, reason: 'No token data' });
+          continue;
+        }
+
+        // Chain validity check
+        const result = await oracle.validateToken(tokenData);
+        if (!result.valid || result.spent) {
+          invalidTokens.push({ token, reason: result.spent ? 'Token already spent' : 'Chain verification failed' });
+          continue;
+        }
+
+        // Ownership check — does the wallet's key match the token's state predicate?
+        if (walletPubkey) {
+          const sdkToken = await SdkToken.fromJSON(tokenData);
+          const predicate = await PredicateEngineService.createPredicate(sdkToken.state.predicate);
+          const isOwner = await predicate.isOwner(walletPubkey);
+          const pubkeyHex = Array.from(walletPubkey).map(b => b.toString(16).padStart(2, '0')).join('');
+          console.log('[WalletManager] Ownership check:', token.id.slice(0, 8), 'isOwner:', isOwner, 'pubkey:', pubkeyHex.slice(0, 16) + '...');
+          if (!isOwner) {
+            invalidTokens.push({ token, reason: 'Ownership mismatch — wallet key does not match token predicate' });
+            continue;
+          }
+        }
+
+        validTokens.push(token);
+      } catch (error) {
+        console.warn('[WalletManager] Token validation failed:', token.id, error);
+        invalidTokens.push({ token, reason: 'Validation error' });
+      }
+    }
+
+    const invalidInfos: TokenHealthInfo[] = invalidTokens.map(({ token: tok, reason }) => ({
+      id: tok.id,
+      coinId: tok.coinId,
+      symbol: COIN_SYMBOLS[tok.coinId] || tok.symbol || 'TOKEN',
+      amount: tok.amount,
+      status: tok.status,
+      isValid: false,
+      reason,
+    }));
+
+    return {
+      total: allTokens.length,
+      valid: validTokens.length,
+      invalid: invalidInfos,
+    };
+  }
+
+  async purgeInvalidTokens(): Promise<{ purged: number }> {
+    const { invalid } = await this.checkTokenHealth();
+    for (const tok of invalid) {
+      await this.getSphere().payments.removeToken(tok.id, undefined, true);
+    }
+    return { purged: invalid.length };
   }
 
   // ============ Address Methods ============
