@@ -16,7 +16,7 @@
     "@scure/base": "^1.1.0",
     "@tailwindcss/postcss": "^4.1.18",
     "@unicitylabs/nostr-js-sdk": "^0.3.2",
-    "@unicitylabs/sphere-sdk": "file:./vendor/unicitylabs-sphere-sdk-0.2.5.tgz",
+    "@unicitylabs/sphere-sdk": "file:../../sphere-sdk/unicitylabs-sphere-sdk-0.3.1.tgz",
     "@unicitylabs/state-transition-sdk": "^1.6.1-rc.f37cb85",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
