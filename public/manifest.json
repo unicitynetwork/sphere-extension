@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sphere Wallet",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Sphere browser extension for wallet identity and payments on Unicity Protocol",
   "icons": {
     "16": "icons/icon16.png",
