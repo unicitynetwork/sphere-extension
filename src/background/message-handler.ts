@@ -982,9 +982,13 @@ async function handlePopupResolveNametag(
 // ============ Transaction Approval/Rejection ============
 
 async function handleApproveTransaction(requestId: string): Promise<{ success: boolean; error?: string }> {
+  console.log('[ApproveTransaction] requestId:', requestId);
+  const allTx = await getPendingTransactions();
+  console.log('[ApproveTransaction] pending transactions:', allTx.length, allTx.map(t => t.requestId));
   const tx = await removePendingTransaction(requestId);
 
   if (!tx) {
+    console.warn('[ApproveTransaction] Transaction not found for requestId:', requestId);
     return { success: false, error: 'Transaction not found' };
   }
 

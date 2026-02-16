@@ -2,7 +2,7 @@
  * Hook for wallet operations - communicates with background service worker.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useStore } from '../store';
 import type {
   WalletState,
@@ -289,11 +289,17 @@ export function useWallet() {
     return address;
   }, []);
 
+  // Synchronous guard against double-submission (React state is async)
+  const processingTxRef = useRef<Set<string>>(new Set());
+
   /**
    * Approve a pending transaction.
    */
   const approveTransaction = useCallback(
     async (requestId: string) => {
+      if (processingTxRef.current.has(requestId)) return;
+      processingTxRef.current.add(requestId);
+
       try {
         setLoading(true);
 
@@ -317,6 +323,7 @@ export function useWallet() {
         setError((error as Error).message);
         throw error;
       } finally {
+        processingTxRef.current.delete(requestId);
         setLoading(false);
       }
     },
@@ -328,6 +335,9 @@ export function useWallet() {
    */
   const rejectTransaction = useCallback(
     async (requestId: string) => {
+      if (processingTxRef.current.has(requestId)) return;
+      processingTxRef.current.add(requestId);
+
       try {
         setLoading(true);
 
@@ -350,6 +360,7 @@ export function useWallet() {
         setError((error as Error).message);
         throw error;
       } finally {
+        processingTxRef.current.delete(requestId);
         setLoading(false);
       }
     },
