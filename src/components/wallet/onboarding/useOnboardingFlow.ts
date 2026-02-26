@@ -1,7 +1,11 @@
 /**
  * useOnboardingFlow - Manages onboarding flow state and navigation
- * Extension-specific: requires password for wallet creation/import (encrypted storage)
- * Simplified from sphere web app: no file import, no address selection, no IPNS
+ * Matches sphere web app flow with extension-specific additions:
+ * - passwordSetup step (encrypted mnemonic storage)
+ * - mnemonicBackup step (show recovery phrase after create)
+ *
+ * Create flow:  start → nametag → passwordSetup → processing → mnemonicBackup → done
+ * Restore flow: start → restoreMethod → restore → passwordSetup → processing → done
  */
 import { useState, useCallback, useEffect } from "react";
 import { useSphereContext } from "@/sdk/context";
@@ -10,57 +14,14 @@ export type NametagAvailability = "idle" | "checking" | "available" | "taken";
 
 export type OnboardingStep =
   | "start"
+  | "restoreMethod"
   | "restore"
-  | "mnemonicBackup"
   | "nametag"
-  | "processing";
+  | "passwordSetup"
+  | "processing"
+  | "mnemonicBackup";
 
-export interface UseOnboardingFlowReturn {
-  // Step management
-  step: OnboardingStep;
-  setStep: (step: OnboardingStep) => void;
-  goToStart: () => void;
-
-  // State
-  isBusy: boolean;
-  error: string | null;
-
-  // Password state (extension-specific)
-  password: string;
-  setPassword: (value: string) => void;
-  confirmPassword: string;
-  setConfirmPassword: (value: string) => void;
-
-  // Mnemonic restore state
-  seedWords: string[];
-  setSeedWords: (words: string[]) => void;
-
-  // Generated mnemonic (from create flow)
-  generatedMnemonic: string | null;
-
-  // Nametag state
-  nametagInput: string;
-  setNametagInput: (value: string) => void;
-  nametagAvailability: NametagAvailability;
-
-  // Processing state
-  processingStatus: string;
-  processingStep: number;
-  processingTotalSteps: number;
-  processingTitle: string;
-  processingCompleteTitle: string;
-  isProcessingComplete: boolean;
-
-  // Actions
-  handleCreateWallet: () => Promise<void>;
-  handleRestoreWallet: () => Promise<void>;
-  handleMnemonicBackupConfirm: () => void;
-  handleMintNametag: () => Promise<void>;
-  handleSkipNametag: () => void;
-  handleCompleteOnboarding: () => void;
-}
-
-export function useOnboardingFlow(): UseOnboardingFlowReturn {
+export function useOnboardingFlow() {
   const {
     createWallet,
     importWallet,
@@ -75,7 +36,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Password state (extension-specific: encrypted mnemonic storage)
+  // Track which flow we're in (create vs restore)
+  const [isRestoreFlow, setIsRestoreFlow] = useState(false);
+
+  // Password state (collected in passwordSetup step)
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
@@ -85,9 +49,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   // Generated mnemonic (from create flow)
   const [generatedMnemonic, setGeneratedMnemonic] = useState<string | null>(null);
 
-  // Nametag state
+  // Nametag state (collected before wallet creation, like sphere)
   const [nametagInput, setNametagInput] = useState("");
   const [nametagAvailability, setNametagAvailability] = useState<NametagAvailability>("idle");
+  const [pendingNametag, setPendingNametag] = useState<string | null>(null);
 
   // Processing state
   const [processingStatus, setProcessingStatus] = useState("");
@@ -124,7 +89,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
           }
         }
       }
-      // All attempts failed
       if (!cancelled) {
         setNametagAvailability("idle");
       }
@@ -136,53 +100,54 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     };
   }, [nametagInput, isNametagAvailable]);
 
-  // Go back to start screen
+  // Go back to start screen — reset all state
   const goToStart = useCallback(() => {
     setStep("start");
     setSeedWords(Array(12).fill(""));
     setPassword("");
     setConfirmPassword("");
     setGeneratedMnemonic(null);
+    setPendingNametag(null);
+    setIsRestoreFlow(false);
     setError(null);
   }, []);
 
-  // Action: Create wallet with password
-  const handleCreateWallet = useCallback(async () => {
-    if (!password) {
-      setError("Please enter a password");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
+  // ---- CREATE FLOW ----
 
-    setIsBusy(true);
+  // Step 1: User clicks "Create New Wallet" → go to nametag (like sphere)
+  const handleCreateKeys = useCallback(() => {
+    setIsRestoreFlow(false);
     setError(null);
-
-    try {
-      const result = await createWallet(password);
-      setGeneratedMnemonic(result.mnemonic);
-      setStep("mnemonicBackup");
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to create wallet";
-      setError(message);
-    } finally {
-      setIsBusy(false);
-    }
-  }, [password, confirmPassword, createWallet]);
-
-  // Action: Confirm mnemonic backup and proceed to nametag
-  const handleMnemonicBackupConfirm = useCallback(() => {
     setStep("nametag");
   }, []);
 
-  // Action: Restore wallet from mnemonic + password
-  const handleRestoreWallet = useCallback(async () => {
+  // Step 2a: User enters nametag → store it, go to passwordSetup
+  const handleMintNametag = useCallback(() => {
+    if (!nametagInput.trim()) return;
+    const cleanTag = nametagInput.trim().replace("@", "");
+    setPendingNametag(cleanTag);
+    setError(null);
+    setStep("passwordSetup");
+  }, [nametagInput]);
+
+  // Step 2b: User skips nametag → go to passwordSetup
+  const handleSkipNametag = useCallback(() => {
+    setPendingNametag(null);
+    setError(null);
+    setStep("passwordSetup");
+  }, []);
+
+  // ---- RESTORE FLOW ----
+
+  // Step 1: User clicks "Restore" → go to restoreMethod
+  const handleStartRestore = useCallback(() => {
+    setIsRestoreFlow(true);
+    setError(null);
+    setStep("restoreMethod");
+  }, []);
+
+  // Step 2: User validates seed words → go to passwordSetup
+  const handleRestoreWallet = useCallback(() => {
     const words = seedWords.map((w) => w.trim().toLowerCase());
     const missingIndex = words.findIndex((w) => w === "");
 
@@ -191,6 +156,13 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       return;
     }
 
+    setError(null);
+    setStep("passwordSetup");
+  }, [seedWords]);
+
+  // ---- PASSWORD STEP (shared by both flows) ----
+
+  const handlePasswordConfirm = useCallback(async () => {
     if (!password) {
       setError("Please enter a password");
       return;
@@ -207,78 +179,95 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
-    try {
-      const mnemonic = words.join(" ");
-      await importWallet(mnemonic, password);
-      setStep("nametag");
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Invalid recovery phrase";
-      setError(message);
-    } finally {
-      setIsBusy(false);
-    }
-  }, [seedWords, password, confirmPassword, importWallet]);
-
-  // Action: Register nametag
-  const handleMintNametag = useCallback(async () => {
-    if (!nametagInput.trim()) return;
-
-    setIsBusy(true);
-    setError(null);
-
-    const cleanTag = nametagInput.trim().replace("@", "");
-
+    // Go to processing and execute wallet creation/import
     setStep("processing");
-    setProcessingTitle("Setting up Profile...");
-    setProcessingCompleteTitle("Profile Ready!");
     setProcessingStep(0);
-    setProcessingTotalSteps(3);
-    setProcessingStatus("Checking Unicity ID availability...");
     setIsProcessingComplete(false);
 
-    try {
-      // Step 1: Check availability
-      const available = await isNametagAvailable(cleanTag);
-      if (!available) {
-        setError(`@${cleanTag} is already taken`);
-        setStep("nametag");
+    if (isRestoreFlow) {
+      // RESTORE: import wallet with mnemonic + password
+      setProcessingTitle("Importing Wallet...");
+      setProcessingCompleteTitle("Import Complete!");
+      setProcessingTotalSteps(3);
+      setProcessingStatus("Importing wallet...");
+
+      try {
+        const mnemonic = seedWords.map((w) => w.trim().toLowerCase()).join(" ");
+        setProcessingStep(1);
+        setProcessingStatus("Restoring wallet...");
+
+        await importWallet(mnemonic, password);
+
+        setProcessingStep(2);
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Invalid recovery phrase";
+        setError(message);
+        setStep("restore");
+      } finally {
         setIsBusy(false);
-        return;
       }
+    } else {
+      // CREATE: create wallet with password + optional nametag
+      setProcessingTotalSteps(pendingNametag ? 3 : 2);
+      setProcessingTitle("Setting up Profile...");
+      setProcessingCompleteTitle("Profile Ready!");
+      setProcessingStatus("Creating wallet...");
 
-      setProcessingStep(1);
-      setProcessingStatus("Registering Unicity ID...");
+      try {
+        // Step 1: Create wallet
+        setProcessingStep(0);
+        setProcessingStatus("Creating wallet...");
 
-      // Step 2: Register nametag
-      await registerNametag(cleanTag);
+        const result = await createWallet(password);
+        setGeneratedMnemonic(result.mnemonic);
 
-      setProcessingStep(2);
-      setProcessingStatus("Setup complete!");
-      setIsProcessingComplete(true);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to register Unicity ID";
-      console.error("Nametag registration failed:", e);
-      setError(message);
-      setStep("nametag");
-    } finally {
-      setIsBusy(false);
+        // Step 2: Register nametag if provided
+        if (pendingNametag) {
+          setProcessingStep(1);
+          setProcessingStatus("Registering Unicity ID...");
+
+          try {
+            await registerNametag(pendingNametag);
+            setProcessingStep(2);
+          } catch (e) {
+            // Nametag registration failed but wallet was created
+            console.error("Nametag registration failed:", e);
+            setProcessingStep(2);
+          }
+        } else {
+          setProcessingStep(1);
+        }
+
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to create wallet";
+        setError(message);
+        setStep("passwordSetup");
+      } finally {
+        setIsBusy(false);
+      }
     }
-  }, [nametagInput, isNametagAvailable, registerNametag]);
+  }, [password, confirmPassword, isRestoreFlow, seedWords, pendingNametag, createWallet, importWallet, registerNametag]);
 
-  // Action: Skip nametag
-  const handleSkipNametag = useCallback(() => {
-    setStep("processing");
-    setProcessingTitle("Setting up Profile...");
-    setProcessingCompleteTitle("Profile Ready!");
-    setProcessingTotalSteps(1);
-    setProcessingStep(1);
-    setProcessingStatus("Setup complete!");
-    setIsProcessingComplete(true);
-  }, []);
+  // ---- PROCESSING COMPLETE ----
 
-  // Action: Complete onboarding
-  const handleCompleteOnboarding = useCallback(() => {
-    // Reload to let the app detect the wallet and show the main UI
+  const handleProcessingComplete = useCallback(() => {
+    if (isRestoreFlow) {
+      // Restore flow: done, reload
+      window.location.reload();
+    } else {
+      // Create flow: show mnemonic backup
+      setStep("mnemonicBackup");
+    }
+  }, [isRestoreFlow]);
+
+  // ---- MNEMONIC BACKUP ----
+
+  const handleMnemonicBackupConfirm = useCallback(() => {
+    // Done — reload to show main wallet UI
     window.location.reload();
   }, []);
 
@@ -291,6 +280,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     // State
     isBusy,
     error,
+    isRestoreFlow,
 
     // Password state
     password,
@@ -319,11 +309,13 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     isProcessingComplete,
 
     // Actions
-    handleCreateWallet,
+    handleCreateKeys,
+    handleStartRestore,
     handleRestoreWallet,
-    handleMnemonicBackupConfirm,
     handleMintNametag,
     handleSkipNametag,
-    handleCompleteOnboarding,
+    handlePasswordConfirm,
+    handleProcessingComplete,
+    handleMnemonicBackupConfirm,
   };
 }

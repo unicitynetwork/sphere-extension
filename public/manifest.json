@@ -22,6 +22,9 @@
     "activeTab",
     "scripting"
   ],
+  "host_permissions": [
+    "https://faucet.unicity.network/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

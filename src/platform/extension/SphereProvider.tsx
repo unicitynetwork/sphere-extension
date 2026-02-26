@@ -41,18 +41,26 @@ export function ExtensionSphereProvider({ children }: { children: React.ReactNod
         if (res.state.isUnlocked) {
           try {
             const idRes = await sendMessage({ type: 'POPUP_GET_IDENTITIES' });
+            const ntRes = await sendMessage({ type: 'POPUP_GET_MY_NAMETAG' });
+
+            // Resolve nametag: prefer stored nametag, fall back to identity label
+            const storedNametag = ntRes.nametag?.nametag ?? null;
+            const labelNametag = idRes.identities?.[0]?.label?.startsWith('@')
+              ? idRes.identities[0].label.slice(1)
+              : undefined;
+            const resolvedNametag = storedNametag ?? labelNametag ?? null;
+
             if (idRes.identities?.[0]) {
               const id = idRes.identities[0];
               setIdentity({
                 chainPubkey: id.publicKey,
                 l1Address: id.id,
                 directAddress: id.id,
-                nametag: id.label?.startsWith('@') ? id.label.slice(1) : undefined,
+                nametag: resolvedNametag ?? undefined,
               });
             }
-            const ntRes = await sendMessage({ type: 'POPUP_GET_MY_NAMETAG' });
-            if (ntRes.nametag) {
-              setNametag(ntRes.nametag.nametag);
+            if (resolvedNametag) {
+              setNametag(resolvedNametag);
             }
           } catch {}
         }
@@ -173,7 +181,16 @@ export function ExtensionSphereProvider({ children }: { children: React.ReactNod
 
   const registerNametag = useCallback(async (tag: string) => {
     const res = await sendMessage({ type: 'POPUP_REGISTER_NAMETAG', nametag: tag });
-    if (res.nametag) setNametag(res.nametag.nametag);
+    const cleanTag = tag.replace('@', '').trim().toLowerCase();
+    if (res.nametag) {
+      setNametag(res.nametag.nametag);
+    } else {
+      // Even if response doesn't include nametag info, set it locally
+      // (NOSTR binding may have succeeded even if mint failed)
+      setNametag(cleanTag);
+    }
+    // Also update identity with the nametag so useIdentity picks it up
+    setIdentity(prev => prev ? { ...prev, nametag: cleanTag } : prev);
     return res.nametag;
   }, []);
 

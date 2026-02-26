@@ -142,7 +142,7 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
       ? 'bg-white/60 dark:bg-neutral-800/60 border-neutral-200/60 dark:border-neutral-700/60 shadow-xl shadow-black/10 dark:shadow-black/30'
       : 'bg-neutral-100/40 dark:bg-neutral-800/40 border-neutral-200/40 dark:border-neutral-700/40 opacity-70'
     } ${isDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
-      {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 via-orange-400 to-orange-600" />}
+      {isPending && <div className="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-orange-500 via-orange-400 to-orange-600" />}
 
       <div className="p-5">
         <div className="flex justify-between items-start mb-5">
@@ -189,7 +189,7 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
               <button
                 onClick={onPay}
                 disabled={isGlobalDisabled}
-                className="relative py-3 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-orange-500 to-orange-600 shadow-xl shadow-orange-500/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:shadow-none overflow-hidden active:scale-[0.97]"
+                className="relative py-3 rounded-xl font-bold text-sm text-white bg-linear-to-r from-orange-500 to-orange-600 shadow-xl shadow-orange-500/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:shadow-none overflow-hidden active:scale-[0.97]"
               >
                 {isProcessing ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> Processing</>

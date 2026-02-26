@@ -14,11 +14,9 @@
 import { Sphere } from '@unicitylabs/sphere-sdk';
 import { NIP44 } from '@unicitylabs/nostr-js-sdk';
 import {
-  createNostrTransportProvider,
-  createUnicityAggregatorProvider,
-  createIndexedDBTokenStorageProvider,
+  createBrowserProviders,
+  type BrowserProviders,
 } from '@unicitylabs/sphere-sdk/impl/browser';
-import { createChromeStorageProvider } from './providers';
 import type {
   IdentityInfo,
   TokenBalance,
@@ -29,9 +27,8 @@ import type {
   NametagResolution,
   StoredNametag,
   NametagInfo,
-  AggregatorConfig,
 } from '@/shared/types';
-import { COIN_SYMBOLS, COIN_DECIMALS, DEFAULT_DECIMALS, ALPHA_COIN_ID, GATEWAY_URL, DEFAULT_NOSTR_RELAYS } from '@/shared/constants';
+import { COIN_SYMBOLS, COIN_DECIMALS, DEFAULT_DECIMALS, ALPHA_COIN_ID } from '@/shared/constants';
 import { deriveNostrKeyPair, signNostrEvent, signMessage } from './nostr-keys';
 import { Token as SdkToken } from '@unicitylabs/state-transition-sdk/lib/token/Token';
 import { PredicateEngineService } from '@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService';
@@ -96,8 +93,8 @@ async function decryptMnemonic(encrypted: string, password: string): Promise<str
  */
 export class WalletManager {
   private sphere: Sphere | null = null;
+  private providers: BrowserProviders | null = null;
   private password: string | null = null;
-  private cachedAggregatorConfig: AggregatorConfig | null = null;
 
   /**
    * Get the current wallet state.
@@ -123,9 +120,6 @@ export class WalletManager {
     const encrypted = await encryptMnemonic(mnemonic, password);
     await chrome.storage.local.set({ [ENCRYPTED_MNEMONIC_KEY]: encrypted });
 
-    // Load aggregator config (API key, gateway URL)
-    await this.loadAggregatorConfig();
-
     // Create sphere instance
     this.sphere = await this.createSphereFromMnemonic(mnemonic);
     this.password = password;
@@ -147,9 +141,6 @@ export class WalletManager {
     const encrypted = await encryptMnemonic(mnemonic, password);
     await chrome.storage.local.set({ [ENCRYPTED_MNEMONIC_KEY]: encrypted });
 
-    // Load aggregator config (API key, gateway URL)
-    await this.loadAggregatorConfig();
-
     // Create sphere instance
     this.sphere = await this.createSphereFromMnemonic(mnemonic);
     this.password = password;
@@ -169,9 +160,6 @@ export class WalletManager {
 
     // Decrypt mnemonic (throws on wrong password)
     const mnemonic = await decryptMnemonic(result[ENCRYPTED_MNEMONIC_KEY], password);
-
-    // Load aggregator config
-    await this.loadAggregatorConfig();
 
     // Create sphere instance
     this.sphere = await this.createSphereFromMnemonic(mnemonic);
@@ -225,22 +213,31 @@ export class WalletManager {
     }
     this.sphere = null;
     this.password = null;
-    this.cachedAggregatorConfig = null;
-
-    // Clear all wallet data from chrome storage
+    // Clear extension-specific data from chrome storage
     await chrome.storage.local.remove([
       ENCRYPTED_MNEMONIC_KEY,
       'nametag',
     ]);
 
-    // Clear SDK storage (keys prefixed with sphere_sdk2_)
-    const all = await chrome.storage.local.get(null);
-    const sdkKeys = Object.keys(all).filter((k) => k.startsWith('sphere_sdk2_'));
-    if (sdkKeys.length > 0) {
-      await chrome.storage.local.remove(sdkKeys);
+    // Clear SDK data from IndexedDB (like sphere web app's deleteWallet)
+    if (this.providers) {
+      try {
+        await Promise.allSettled([
+          this.providers.storage.disconnect(),
+          this.providers.tokenStorage.disconnect(),
+        ]);
+        const clearDone = Sphere.clear({
+          storage: this.providers.storage,
+          tokenStorage: this.providers.tokenStorage,
+        });
+        await Promise.race([clearDone, new Promise(r => setTimeout(r, 5000))]);
+      } catch (e) {
+        console.warn('[WalletManager] Sphere.clear() failed:', e);
+      }
+      this.providers = null;
     }
 
-    // Clear IndexedDB token storage used by SDK
+    // Safety net: delete all IndexedDB databases
     try {
       const dbs = await indexedDB.databases();
       for (const db of dbs) {
@@ -251,6 +248,15 @@ export class WalletManager {
     } catch (e) {
       console.warn('[WalletManager] Could not clear IndexedDB:', e);
     }
+
+    // Clear any legacy chrome.storage SDK keys (from old installs)
+    try {
+      const all = await chrome.storage.local.get(null);
+      const sdkKeys = Object.keys(all).filter((k) => k.startsWith('sphere_sdk2_'));
+      if (sdkKeys.length > 0) {
+        await chrome.storage.local.remove(sdkKeys);
+      }
+    } catch { /* ignore */ }
 
     console.log('[WalletManager] Wallet reset complete');
   }
@@ -267,28 +273,19 @@ export class WalletManager {
       }
     }
     this.sphere = null;
+    this.providers = null;
     this.password = null;
-    this.cachedAggregatorConfig = null;
   }
 
-  // ============ Aggregator Config ============
+  // ============ Aggregator Config (no-op, SDK handles via createBrowserProviders) ============
 
-  private async loadAggregatorConfig(): Promise<void> {
+  async getAggregatorConfig(): Promise<{ gatewayUrl: string; apiKey?: string }> {
     const result = await chrome.storage.local.get(['aggregatorConfig']);
-    this.cachedAggregatorConfig = result.aggregatorConfig || null;
+    return result.aggregatorConfig || { gatewayUrl: '' };
   }
 
-  async getAggregatorConfig(): Promise<AggregatorConfig> {
-    const result = await chrome.storage.local.get(['aggregatorConfig']);
-    return result.aggregatorConfig || {
-      gatewayUrl: GATEWAY_URL,
-      apiKey: undefined,
-    };
-  }
-
-  async setAggregatorConfig(config: AggregatorConfig): Promise<void> {
+  async setAggregatorConfig(config: { gatewayUrl: string; apiKey?: string }): Promise<void> {
     await chrome.storage.local.set({ aggregatorConfig: config });
-    this.cachedAggregatorConfig = config;
   }
 
   // ============ State Checks ============
@@ -665,23 +662,58 @@ export class WalletManager {
   }
 
   async isNametagAvailable(nametag: string): Promise<boolean> {
-    const sphere = this.getSphere();
     const cleanTag = nametag.replace('@', '').trim().toLowerCase();
 
-    // If this wallet already owns this nametag (NOSTR binding done, mint may be pending),
-    // treat it as "available" so the user can retry the mint.
-    if (sphere.identity?.nametag === cleanTag) {
-      console.log(`[WalletManager] isNametagAvailable: @${cleanTag} is owned by this wallet, treating as available`);
-      return true;
+    // If wallet is unlocked, use the SDK's built-in check
+    if (this.sphere) {
+      // If this wallet already owns this nametag (NOSTR binding done, mint may be pending),
+      // treat it as "available" so the user can retry the mint.
+      if (this.sphere.identity?.nametag === cleanTag) {
+        console.log(`[WalletManager] isNametagAvailable: @${cleanTag} is owned by this wallet, treating as available`);
+        return true;
+      }
+
+      try {
+        const result = await this.sphere.isNametagAvailable(cleanTag);
+        console.log('[WalletManager] isNametagAvailable result for', cleanTag, ':', result);
+        return result;
+      } catch (error) {
+        console.error('[WalletManager] Nametag availability check error:', error);
+        return false;
+      }
     }
 
+    // Wallet is locked / not created yet — use standalone transport for read-only check
+    // (like sphere web app does with dummy identity)
+    return this.isNametagAvailableStandalone(cleanTag);
+  }
+
+  /**
+   * Check nametag availability via a temporary transport (no wallet required).
+   * Mirrors sphere web app's resolveNametag() approach with dummy identity.
+   */
+  private async isNametagAvailableStandalone(cleanTag: string): Promise<boolean> {
+    let tempProviders: BrowserProviders | null = null;
     try {
-      const result = await sphere.isNametagAvailable(cleanTag);
-      console.log('[WalletManager] isNametagAvailable result for', cleanTag, ':', result);
-      return result;
+      tempProviders = createBrowserProviders({ network: 'testnet' });
+      const transport = tempProviders.transport;
+      await transport.connect();
+      // Set dummy identity for read-only queries (like sphere SphereProvider.tsx)
+      await transport.setIdentity({
+        privateKey: '0000000000000000000000000000000000000000000000000000000000000001',
+        chainPubkey: '000000000000000000000000000000000000000000000000000000000000000000',
+        l1Address: '',
+      });
+
+      const resolved = await transport.resolveNametag?.(cleanTag);
+      const available = !resolved;
+      console.log(`[WalletManager] Standalone nametag check for @${cleanTag}: ${available ? 'available' : 'taken'}`);
+      return available;
     } catch (error) {
-      console.error('[WalletManager] Nametag availability check error:', error);
+      console.error('[WalletManager] Standalone nametag check error:', error);
       return false;
+    } finally {
+      try { await tempProviders?.transport?.disconnect?.(); } catch { /* ignore */ }
     }
   }
 
@@ -702,19 +734,6 @@ export class WalletManager {
       await sphere.registerNametag(cleanTag);
     }
 
-    // Mint on-chain nametag token (required for receiving PROXY transfers)
-    if (!(sphere as any)._payments?.hasNametag?.()) {
-      console.log('[WalletManager] Minting nametag token on-chain...');
-      const mintResult = await (sphere as any).mintNametag(cleanTag);
-      if (!mintResult.success) {
-        console.error('[WalletManager] Nametag mint failed:', JSON.stringify(mintResult));
-        throw new Error(`Nametag mint failed: ${JSON.stringify(mintResult.error)}`);
-      }
-      console.log('[WalletManager] Nametag minted on-chain:', cleanTag);
-    } else {
-      console.log('[WalletManager] Nametag token already present, skipping mint');
-    }
-
     const nametagInfo: NametagInfo = {
       nametag: cleanTag,
       proxyAddress: sphere.identity?.directAddress ?? '',
@@ -722,13 +741,33 @@ export class WalletManager {
       status: 'active',
     };
 
-    // Save to chrome storage for local lookup
+    // Save to chrome storage BEFORE minting — so nametag is persisted even if mint fails.
+    // On next unlock the SDK will re-read the binding from the relay.
     await this.saveNametag({
       name: cleanTag,
       tokenJson: '{}',
       proxyAddress: nametagInfo.proxyAddress,
       timestamp: Date.now(),
     });
+
+    // Mint on-chain nametag token (required for receiving PROXY transfers).
+    // Failure here is non-fatal — the nametag is already bound on Nostr
+    // and saved locally. The mint can be retried later.
+    try {
+      if (!(sphere as any)._payments?.hasNametag?.()) {
+        console.log('[WalletManager] Minting nametag token on-chain...');
+        const mintResult = await (sphere as any).mintNametag(cleanTag);
+        if (!mintResult.success) {
+          console.warn('[WalletManager] Nametag mint failed (non-fatal):', JSON.stringify(mintResult));
+        } else {
+          console.log('[WalletManager] Nametag minted on-chain:', cleanTag);
+        }
+      } else {
+        console.log('[WalletManager] Nametag token already present, skipping mint');
+      }
+    } catch (mintErr) {
+      console.warn('[WalletManager] Nametag mint error (non-fatal):', mintErr);
+    }
 
     return nametagInfo;
   }
@@ -871,33 +910,16 @@ export class WalletManager {
   // ============ Sphere Instance Creation ============
 
   private async createSphereFromMnemonic(mnemonic: string): Promise<Sphere> {
-    const config = this.cachedAggregatorConfig;
-    const gatewayUrl = config?.gatewayUrl || GATEWAY_URL;
-
-    const storage = createChromeStorageProvider({ prefix: 'sphere_sdk2_', debug: true });
-    await storage.connect();
-
-    const transport = createNostrTransportProvider({
-      relays: DEFAULT_NOSTR_RELAYS,
-      debug: true,
-    });
-
-    const oracle = createUnicityAggregatorProvider({
-      url: gatewayUrl,
-      apiKey: config?.apiKey,
-      trustBaseUrl: 'https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/bft-trustbase.testnet.json',
-      debug: true,
-    });
-
-    const tokenStorage = createIndexedDBTokenStorageProvider();
+    // Create providers exactly like sphere web app — SDK handles all URLs/relays
+    const browserProviders = createBrowserProviders({ network: 'testnet' });
+    this.providers = browserProviders;
 
     // Use init() which auto-loads existing or creates new
     const { sphere } = await Sphere.init({
+      ...browserProviders,
       mnemonic,
-      storage,
-      transport,
-      oracle,
-      tokenStorage,
+      l1: {},
+      discoverAddresses: false,
     });
 
     // Migrate data from old address format if needed (SDK 0.1.2 → 0.1.9 changed address encoding)
@@ -910,21 +932,15 @@ export class WalletManager {
         const idbMigrated = await migrateOldIndexedDBData(directAddress);
         if (chrMigrated || idbMigrated) {
           console.log('[WalletManager] Migrated old data, destroying first sphere and reloading...');
-          // Destroy first instance to clean up transport handlers before re-init
           try { await sphere.destroy(); } catch { /* ignore */ }
           // Re-create providers (transport was disconnected by destroy)
-          const storage2 = createChromeStorageProvider({ prefix: 'sphere_sdk2_', debug: true });
-          await storage2.connect();
-          const transport2 = createNostrTransportProvider({ relays: DEFAULT_NOSTR_RELAYS, debug: true });
-          const oracle2 = createUnicityAggregatorProvider({
-            url: gatewayUrl,
-            apiKey: config?.apiKey,
-            trustBaseUrl: 'https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/bft-trustbase.testnet.json',
-            debug: true,
-          });
-          const tokenStorage2 = createIndexedDBTokenStorageProvider();
+          const browserProviders2 = createBrowserProviders({ network: 'testnet' });
+          this.providers = browserProviders2;
           const { sphere: reloaded } = await Sphere.init({
-            mnemonic, storage: storage2, transport: transport2, oracle: oracle2, tokenStorage: tokenStorage2,
+            ...browserProviders2,
+            mnemonic,
+            l1: {},
+            discoverAddresses: false,
           });
           return reloaded;
         }

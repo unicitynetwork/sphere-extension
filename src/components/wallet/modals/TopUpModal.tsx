@@ -3,6 +3,31 @@ import { Plus, Sparkles, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { useIdentity } from '@/sdk';
 import { BaseModal, ModalHeader, Button } from '@/components/ui';
 
+const FAUCET_API_URL = 'https://faucet.unicity.network/api/v1/faucet/request';
+
+const FAUCET_COINS = [
+  { coin: 'unicity', amount: 100 },
+  { coin: 'bitcoin', amount: 1 },
+  { coin: 'solana', amount: 1000 },
+  { coin: 'ethereum', amount: 42 },
+  { coin: 'tether', amount: 1000 },
+  { coin: 'usd-coin', amount: 1000 },
+  { coin: 'unicity-usd', amount: 1000 },
+];
+
+async function requestTokens(unicityId: string, coin: string, amount: number) {
+  const response = await fetch(FAUCET_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unicityId, coin, amount }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to request ${coin}: ${response.statusText} - ${errorText}`);
+  }
+  return { success: true, coin, amount, ...(await response.json()) };
+}
+
 interface TopUpModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -23,16 +48,20 @@ export function TopUpModal({ isOpen, onClose }: TopUpModalProps) {
     setFaucetSuccess(false);
 
     try {
-      // Request tokens via faucet API
-      const response = await fetch(`https://faucet.unicity.network/api/faucet/request-all?nametag=${encodeURIComponent(nametag)}`);
-      if (!response.ok) {
-        throw new Error(`Faucet request failed: ${response.statusText}`);
-      }
-      const results = await response.json();
-      const failedRequests = Array.isArray(results) ? results.filter((r: any) => !r.success) : [];
+      const results = await Promise.all(
+        FAUCET_COINS.map(({ coin, amount }) =>
+          requestTokens(nametag, coin, amount).catch((error) => ({
+            success: false,
+            coin,
+            amount,
+            message: error instanceof Error ? error.message : 'Unknown error',
+          }))
+        )
+      );
+      const failedRequests = results.filter((r) => !r.success);
 
       if (failedRequests.length > 0) {
-        const failedCoins = failedRequests.map((r: any) => r.coin).join(', ');
+        const failedCoins = failedRequests.map((r) => r.coin).join(', ');
         setFaucetError(`Failed to request: ${failedCoins}`);
       } else {
         setFaucetSuccess(true);

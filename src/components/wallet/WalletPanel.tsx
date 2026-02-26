@@ -32,7 +32,7 @@ export function WalletPanel() {
           </div>
           <button
             onClick={() => window.location.reload()}
-            className="px-5 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-orange-500/25 hover:scale-[1.02] active:scale-[0.98] transition-transform"
+            className="px-5 py-2 bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-orange-500/25 hover:scale-[1.02] active:scale-[0.98] transition-transform"
           >
             Reload
           </button>
@@ -109,7 +109,7 @@ export function WalletPanel() {
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="relative">
               <div className="absolute inset-0 rounded-lg sm:rounded-xl blur-lg opacity-50 bg-orange-500" />
-              <div className="relative w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl">
+              <div className="relative w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl">
                 <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
             </div>

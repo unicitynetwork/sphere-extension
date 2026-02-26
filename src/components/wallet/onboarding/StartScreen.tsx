@@ -1,25 +1,18 @@
 /**
  * StartScreen - Initial onboarding screen
- * Extension-adapted: includes password input for wallet creation (encrypted storage)
- * Removed: "Continue Setup", IPNS checking, framer-motion
+ * Ported from sphere web app — no passwords, clean layout
  */
 import {
   Wallet,
   ArrowRight,
   Loader2,
   KeyRound,
-  Eye,
-  EyeOff,
 } from "lucide-react";
-import { useState } from "react";
 
 interface StartScreenProps {
   isBusy: boolean;
   error: string | null;
-  password: string;
-  confirmPassword: string;
-  onPasswordChange: (value: string) => void;
-  onConfirmPasswordChange: (value: string) => void;
+  progressMessage?: string | null;
   onCreateWallet: () => void;
   onRestore: () => void;
 }
@@ -27,22 +20,10 @@ interface StartScreenProps {
 export function StartScreen({
   isBusy,
   error,
-  password,
-  confirmPassword,
-  onPasswordChange,
-  onConfirmPasswordChange,
+  progressMessage,
   onCreateWallet,
   onRestore,
 }: StartScreenProps) {
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && password && confirmPassword && !isBusy) {
-      onCreateWallet();
-    }
-  };
-
   return (
     <div className="relative z-10 w-full max-w-90">
       {/* Icon with glow effect */}
@@ -63,53 +44,9 @@ export function StartScreen({
         </span>
       </p>
 
-      {/* Password inputs for wallet creation */}
-      <div className="space-y-3 mb-5">
-        <div className="relative">
-          <input
-            type={showPassword ? "text" : "password"}
-            value={password}
-            onChange={(e) => onPasswordChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Create password (min 8 characters)"
-            disabled={isBusy}
-            className="w-full bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 pl-3 pr-10 text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-white dark:focus:bg-neutral-800 transition-all disabled:opacity-50"
-            autoFocus
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
-            tabIndex={-1}
-          >
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-
-        <div className="relative">
-          <input
-            type={showConfirm ? "text" : "password"}
-            value={confirmPassword}
-            onChange={(e) => onConfirmPasswordChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Confirm password"
-            disabled={isBusy}
-            className="w-full bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 pl-3 pr-10 text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-white dark:focus:bg-neutral-800 transition-all disabled:opacity-50"
-          />
-          <button
-            type="button"
-            onClick={() => setShowConfirm(!showConfirm)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
-            tabIndex={-1}
-          >
-            {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-      </div>
-
       <button
         onClick={onCreateWallet}
-        disabled={isBusy || !password || !confirmPassword}
+        disabled={isBusy}
         className="relative w-full py-3.5 px-5 rounded-xl bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-bold shadow-xl shadow-orange-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
       >
         <div className="absolute inset-0 bg-linear-to-r from-orange-400 to-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -127,6 +64,13 @@ export function StartScreen({
           )}
         </span>
       </button>
+
+      {isBusy && progressMessage && (
+        <div className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-[11px] mt-2.5">
+          <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
+          <span>{progressMessage}</span>
+        </div>
+      )}
 
       <button
         onClick={onRestore}

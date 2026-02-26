@@ -831,10 +831,8 @@ async function handleCheckNametagAvailable(
 async function handlePopupCheckNametagAvailable(
   nametag: string
 ): Promise<{ success: boolean; available?: boolean; error?: string }> {
-  if (!walletManager.isUnlocked()) {
-    return { success: false, error: 'Wallet is locked' };
-  }
-
+  // NOTE: No wallet-locked guard — nametag availability check works without a wallet
+  // (uses standalone Nostr transport with dummy identity when wallet is locked).
   try {
     const available = await nametagMintService.isAvailable(nametag);
     return { success: true, available };

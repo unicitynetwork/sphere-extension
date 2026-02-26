@@ -1,8 +1,11 @@
 export { CreateWalletFlow } from "./CreateWalletFlow";
 export type { OnboardingStep } from "./CreateWalletFlow";
 export { StartScreen } from "./StartScreen";
+export { RestoreMethodScreen } from "./RestoreMethodScreen";
 export { RestoreScreen } from "./RestoreScreen";
+export { PasswordSetupScreen } from "./PasswordSetupScreen";
+export { ProcessingScreen } from "./ProcessingScreen";
 export { MnemonicBackupScreen } from "./MnemonicBackupScreen";
 export { NametagScreen } from "./NametagScreen";
-export type { NametagAvailability } from "./NametagScreen";
+export type { NametagAvailability } from "./useOnboardingFlow";
 export { useOnboardingFlow } from "./useOnboardingFlow";
