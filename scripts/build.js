@@ -87,18 +87,17 @@ async function buildExtension() {
     resolve: {
       preserveSymlinks: true,
       alias: {
-        '@/background': resolve(root, 'src/background'),
-        '@/content': resolve(root, 'src/content'),
-        '@/inject': resolve(root, 'src/inject'),
-        '@/popup': resolve(root, 'src/popup'),
         '@/shared': resolve(root, 'src/shared'),
+        '@/sdk': resolve(root, 'src/sdk'),
+        '@/components': resolve(root, 'src/components'),
+        '@/platform': resolve(root, 'src/platform'),
       },
     },
     build: {
       outDir: resolve(root, 'dist'),
       emptyOutDir: false,
       lib: {
-        entry: resolve(root, 'src/background/index.ts'),
+        entry: resolve(root, 'src/platform/extension/background/index.ts'),
         name: 'background',
         formats: ['es'],
         fileName: () => 'background.js',
@@ -122,18 +121,17 @@ async function buildExtension() {
     resolve: {
       preserveSymlinks: true,
       alias: {
-        '@/background': resolve(root, 'src/background'),
-        '@/content': resolve(root, 'src/content'),
-        '@/inject': resolve(root, 'src/inject'),
-        '@/popup': resolve(root, 'src/popup'),
         '@/shared': resolve(root, 'src/shared'),
+        '@/sdk': resolve(root, 'src/sdk'),
+        '@/components': resolve(root, 'src/components'),
+        '@/platform': resolve(root, 'src/platform'),
       },
     },
     build: {
       outDir: resolve(root, 'dist'),
       emptyOutDir: false,
       lib: {
-        entry: resolve(root, 'src/content/index.ts'),
+        entry: resolve(root, 'src/platform/extension/content/index.ts'),
         name: 'content',
         formats: ['iife'],
         fileName: () => 'content.js',
@@ -157,18 +155,17 @@ async function buildExtension() {
     resolve: {
       preserveSymlinks: true,
       alias: {
-        '@/background': resolve(root, 'src/background'),
-        '@/content': resolve(root, 'src/content'),
-        '@/inject': resolve(root, 'src/inject'),
-        '@/popup': resolve(root, 'src/popup'),
         '@/shared': resolve(root, 'src/shared'),
+        '@/sdk': resolve(root, 'src/sdk'),
+        '@/components': resolve(root, 'src/components'),
+        '@/platform': resolve(root, 'src/platform'),
       },
     },
     build: {
       outDir: resolve(root, 'dist'),
       emptyOutDir: false,
       lib: {
-        entry: resolve(root, 'src/inject/index.ts'),
+        entry: resolve(root, 'src/platform/extension/inject/index.ts'),
         name: 'inject',
         formats: ['iife'],
         fileName: () => 'inject.js',

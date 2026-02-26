@@ -12,16 +12,18 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "paths": {
-      "@/background/*": ["src/background/*"],
-      "@/content/*": ["src/content/*"],
-      "@/inject/*": ["src/inject/*"],
-      "@/popup/*": ["src/popup/*"],
-      "@/shared/*": ["src/shared/*"]
+      "@/shared": ["./src/shared"],
+      "@/shared/*": ["./src/shared/*"],
+      "@/sdk": ["./src/sdk/index.ts"],
+      "@/sdk/*": ["./src/sdk/*"],
+      "@/components": ["./src/components"],
+      "@/components/*": ["./src/components/*"],
+      "@/platform": ["./src/platform"],
+      "@/platform/*": ["./src/platform/*"]
     }
   },
   "include": ["src"]

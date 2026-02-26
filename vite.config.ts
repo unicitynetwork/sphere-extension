@@ -1,13 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
 
 export default defineConfig({
   plugins: [
     react(),
+    tailwindcss(),
     nodePolyfills({
-      // Enable polyfills for crypto and buffer used by sphere-sdk
       include: ['crypto', 'buffer', 'stream', 'zlib', 'vm'],
       globals: {
         Buffer: true,
@@ -18,11 +19,10 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@/background': resolve(__dirname, 'src/background'),
-      '@/content': resolve(__dirname, 'src/content'),
-      '@/inject': resolve(__dirname, 'src/inject'),
-      '@/popup': resolve(__dirname, 'src/popup'),
       '@/shared': resolve(__dirname, 'src/shared'),
+      '@/sdk': resolve(__dirname, 'src/sdk'),
+      '@/components': resolve(__dirname, 'src/components'),
+      '@/platform': resolve(__dirname, 'src/platform'),
     },
   },
   build: {
@@ -42,6 +42,5 @@ export default defineConfig({
     minify: false,
     sourcemap: true,
   },
-  // Disable automatic public directory copying - handled in build script
   publicDir: false,
 });
