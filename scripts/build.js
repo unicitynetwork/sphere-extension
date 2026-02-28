@@ -7,7 +7,7 @@ import { build } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { copyFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync, statSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync, statSync, readFileSync, writeFileSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -56,6 +56,14 @@ async function buildExtension() {
   // Copy public assets (manifest.json, icons) - exclude popup.html since it's built
   console.log('Copying public assets...');
   copyDir(publicDir, distDir, ['popup.html']);
+
+  // Inject version from package.json into dist/manifest.json
+  const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf-8'));
+  const manifestPath = resolve(distDir, 'manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  manifest.version = pkg.version;
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+  console.log(`manifest.json version set to ${pkg.version}`);
 
   // Move popup.html from dist/public to dist root
   const distPublicDir = resolve(distDir, 'public');
