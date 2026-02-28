@@ -10,7 +10,8 @@
  * Responses are sent back with type 'sphere-connect-ext:toclient'.
  */
 
-import type { ConnectTransport } from '@unicitylabs/sphere-sdk/connect';
+import type { ConnectTransport, SphereConnectMessage } from '@unicitylabs/sphere-sdk/connect';
+import { isSphereConnectMessage } from '@unicitylabs/sphere-sdk/connect';
 
 export const EXT_MSG_TO_HOST = 'sphere-connect-ext:tohost';
 export const EXT_MSG_TO_CLIENT = 'sphere-connect-ext:toclient';
@@ -38,7 +39,7 @@ export interface ExtensionHostMessagingApi {
 }
 
 class ExtensionHostTransportImpl implements ConnectTransport {
-  private handlers: Set<(msg: unknown) => void> = new Set();
+  private handlers: Set<(message: SphereConnectMessage) => void> = new Set();
   private activeTabId: number | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private listener: ((msg: unknown, sender: any) => void) | null = null;
@@ -53,6 +54,7 @@ class ExtensionHostTransportImpl implements ConnectTransport {
 
       if (sender.tab?.id !== undefined) this.activeTabId = sender.tab.id;
 
+      if (!isSphereConnectMessage(msg.payload)) return;
       for (const h of this.handlers) {
         try { h(msg.payload); } catch { /* ignore */ }
       }
@@ -61,13 +63,13 @@ class ExtensionHostTransportImpl implements ConnectTransport {
     this.api.onMessage.addListener(this.listener);
   }
 
-  send(message: unknown): void {
+  send(message: SphereConnectMessage): void {
     if (this.activeTabId === null) return;
     const envelope: ExtConnectEnvelope = { type: EXT_MSG_TO_CLIENT, payload: message };
     try { this.api.tabs.sendMessage(this.activeTabId, envelope); } catch { /* tab closed */ }
   }
 
-  onMessage(handler: (msg: unknown) => void): () => void {
+  onMessage(handler: (message: SphereConnectMessage) => void): () => void {
     this.handlers.add(handler);
     return () => { this.handlers.delete(handler); };
   }

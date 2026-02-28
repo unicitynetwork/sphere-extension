@@ -31,10 +31,6 @@ export default defineConfig({
       // sphere-sdk/node_modules/nostr-js-sdk was compiled with vite-plugin-node-polyfills
       // which leaves shim references that break when bundled in a different Vite project.
       { find: '@unicitylabs/nostr-js-sdk', replacement: resolve(__dirname, 'node_modules/@unicitylabs/nostr-js-sdk/dist/browser/index.js') },
-      // Redirect SDK connect subpaths directly to source TypeScript.
-      { find: '@unicitylabs/sphere-sdk/connect/browser', replacement: resolve(__dirname, '../sphere-sdk/impl/browser/connect/index.ts') },
-      { find: '@unicitylabs/sphere-sdk/connect', replacement: resolve(__dirname, '../sphere-sdk/connect/index.ts') },
-      { find: '@unicitylabs/sphere-sdk/impl/browser', replacement: resolve(__dirname, '../sphere-sdk/impl/browser/index.ts') },
     ],
   },
   optimizeDeps: {
@@ -47,7 +43,7 @@ export default defineConfig({
       'crypto-js',
       'elliptic',
     ],
-    exclude: ['@unicitylabs/sphere-sdk/connect/browser'],
+    exclude: [],
   },
   build: {
     outDir: 'dist',

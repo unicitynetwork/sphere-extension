@@ -15,7 +15,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "types": ["chrome"],
+    "types": ["chrome", "node"],
     "paths": {
       "@/shared": ["./src/shared"],
       "@/shared/*": ["./src/shared/*"],
@@ -24,13 +24,7 @@
       "@/components": ["./src/components"],
       "@/components/*": ["./src/components/*"],
       "@/platform": ["./src/platform"],
-      "@/platform/*": ["./src/platform/*"],
-      "@unicitylabs/sphere-sdk": ["../sphere-sdk/index.ts"],
-      "@unicitylabs/sphere-sdk/connect": ["../sphere-sdk/connect/index.ts"],
-      "@unicitylabs/sphere-sdk/connect/browser": ["../sphere-sdk/impl/browser/connect/index.ts"],
-      "@unicitylabs/sphere-sdk/connect/nodejs": ["../sphere-sdk/impl/nodejs/connect/index.ts"],
-      "@unicitylabs/sphere-sdk/impl/browser": ["../sphere-sdk/impl/browser/index.ts"],
-      "@unicitylabs/sphere-sdk/impl/nodejs": ["../sphere-sdk/impl/nodejs/index.ts"]
+      "@/platform/*": ["./src/platform/*"]
     }
   },
   "include": ["src"]
