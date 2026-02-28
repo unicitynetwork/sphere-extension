@@ -2,12 +2,8 @@
  * StartScreen - Initial onboarding screen
  * Ported from sphere web app — no passwords, clean layout
  */
-import {
-  Wallet,
-  ArrowRight,
-  Loader2,
-  KeyRound,
-} from "lucide-react";
+import { ArrowRight, Loader2, KeyRound } from "lucide-react";
+import { UnionIcon } from "@/components/ui/UnionIcon";
 
 interface StartScreenProps {
   isBusy: boolean;
@@ -30,7 +26,7 @@ export function StartScreen({
       <div className="relative w-18 h-18 mx-auto mb-6">
         <div className="absolute inset-0 bg-linear-to-br from-orange-500 to-orange-600 rounded-2xl blur-xl opacity-45" />
         <div className="relative w-full h-full rounded-2xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl shadow-orange-500/25">
-          <Wallet className="w-9 h-9 text-white" />
+          <UnionIcon size={36} />
         </div>
       </div>
 

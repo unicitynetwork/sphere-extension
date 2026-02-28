@@ -1,4 +1,5 @@
-import { Wallet, Clock, Bell, MoreVertical, Tag, Loader2, RefreshCw } from 'lucide-react';
+import { Clock, Bell, MoreVertical, Tag, Loader2, RefreshCw } from 'lucide-react';
+import { UnionIcon } from '@/components/ui/UnionIcon';
 import { useState, useEffect } from 'react';
 import { L3WalletView } from './L3WalletView';
 import { useIdentity, useWalletStatus, useSphereContext } from '@/sdk';
@@ -184,7 +185,7 @@ export function WalletPanel() {
             <div className="relative">
               <div className="absolute inset-0 rounded-lg sm:rounded-xl blur-lg opacity-50 bg-orange-500" />
               <div className="relative w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl">
-                <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                <UnionIcon size={18} className="shrink-0" />
               </div>
             </div>
 

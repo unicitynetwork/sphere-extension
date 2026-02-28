@@ -6,6 +6,9 @@ export { ModalHeader } from './ModalHeader';
 export { AlertMessage } from './AlertMessage';
 export { EmptyState } from './EmptyState';
 
+// Icons
+export { UnionIcon } from './UnionIcon';
+
 // Button components
 export { Button, PrimaryButton, SecondaryButton, DangerButton, SuccessButton } from './Button';
 export { MenuButton } from './MenuButton';
