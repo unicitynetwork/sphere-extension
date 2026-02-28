@@ -432,9 +432,13 @@ export async function handlePopupMessage(
       }
 
       case 'POPUP_SEND_L1_TOKENS': {
-        const { to, amountSatoshis } = message as { to: string; amountSatoshis: string };
-        const result = await walletManager.sendL1Tokens(to, amountSatoshis);
+        const { to, amountSatoshis, vestingMode } = message as { to: string; amountSatoshis: string; vestingMode?: 'all' | 'vested' | 'unvested' };
+        const result = await walletManager.sendL1Tokens(to, amountSatoshis, vestingMode);
         return result;
+      }
+
+      case 'POPUP_GET_L1_VESTING_BALANCES': {
+        return walletManager.getL1VestingBalances();
       }
 
       case 'POPUP_SEND_PAYMENT_REQUEST': {

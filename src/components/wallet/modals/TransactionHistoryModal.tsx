@@ -1,5 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { ArrowUpRight, ArrowDownLeft, Loader2, Clock, ChevronDown, Copy, Check } from 'lucide-react';
+import { TokenRegistry } from '@unicitylabs/sphere-sdk';
 import { useTransactionHistory } from '@/sdk';
 import { BaseModal, ModalHeader, EmptyState } from '@/components/ui';
 
@@ -78,8 +79,9 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
   const { copiedKey, copy } = useCopyToClipboard();
 
   const formattedHistory = useMemo(() => {
+    const registry = TokenRegistry.getInstance();
     return history.map((entry: any) => {
-      const decimals = entry.decimals || 0;
+      const decimals = registry.getDecimals(entry.coinId);
 
       return {
         ...entry,

@@ -635,11 +635,30 @@ export class WalletManager {
 
   // ============ L1 Payments ============
 
-  async sendL1Tokens(to: string, amountSatoshis: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  async sendL1Tokens(
+    to: string,
+    amountSatoshis: string,
+    vestingMode?: 'all' | 'vested' | 'unvested',
+  ): Promise<{ success: boolean; txHash?: string; error?: string }> {
     const sphere = this.getSphere();
     if (!sphere.payments.l1) throw new Error('L1 payments not available');
-    const result = await sphere.payments.l1.send({ to, amount: amountSatoshis });
+    // Map UI vesting mode to SDK useVested boolean param
+    let useVested: boolean | undefined;
+    if (vestingMode === 'vested') useVested = true;
+    else if (vestingMode === 'unvested') useVested = false;
+    const result = await sphere.payments.l1.send({ to, amount: amountSatoshis, useVested });
     return result;
+  }
+
+  async getL1VestingBalances(): Promise<{ vested: string; unvested: string; total: string }> {
+    const sphere = this.getSphere();
+    if (!sphere.payments.l1) return { vested: '0', unvested: '0', total: '0' };
+    try {
+      const balance = await sphere.payments.l1.getBalance();
+      return { vested: balance.vested, unvested: balance.unvested, total: balance.total };
+    } catch {
+      return { vested: '0', unvested: '0', total: '0' };
+    }
   }
 
   // ============ Export ============

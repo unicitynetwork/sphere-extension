@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { MessageSquare, Key, Zap } from 'lucide-react';
+import { MessageSquare, Key, Zap, Loader2 } from 'lucide-react';
 import { ERROR_CODES } from '@unicitylabs/sphere-sdk/connect';
 import { BaseModal } from '@/components/ui/BaseModal';
 import { ModalHeader } from '@/components/ui/ModalHeader';
@@ -188,6 +188,20 @@ export function ConnectIntentModal({ isOpen, onClose }: ConnectIntentModalProps)
 
 // ── L1 Send ──────────────────────────────────────────────────────────────────
 
+type VestingMode = 'all' | 'vested' | 'unvested';
+
+interface L1Balances {
+  vested: string;
+  unvested: string;
+  total: string;
+}
+
+function formatAlpha(satoshis: string): string {
+  const n = Number(satoshis);
+  if (!n) return '0';
+  return (n / 1e8).toFixed(4);
+}
+
 function L1SendIntentModal({
   isOpen,
   intent,
@@ -210,8 +224,23 @@ function L1SendIntentModal({
 
   const [to, setTo] = useState((params.to as string) ?? '');
   const [amount, setAmount] = useState(defaultAmount);
+  const [vestingMode, setVestingMode] = useState<VestingMode>('all');
+  const [balances, setBalances] = useState<L1Balances | null>(null);
+  const [balancesLoading, setBalancesLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch L1 vesting balances on mount
+  useEffect(() => {
+    let cancelled = false;
+    chrome.runtime.sendMessage({ type: POPUP_MESSAGES.GET_L1_VESTING_BALANCES }).then((res) => {
+      if (!cancelled && res) setBalances(res);
+      if (!cancelled) setBalancesLoading(false);
+    }).catch(() => {
+      if (!cancelled) setBalancesLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleClose = useCallback(async () => {
     await rejectIntent(id);
@@ -229,6 +258,7 @@ function L1SendIntentModal({
         type: POPUP_MESSAGES.SEND_L1_TOKENS,
         to,
         amountSatoshis,
+        vestingMode,
       });
       if (!result?.success) throw new Error(result?.error || 'L1 send failed');
       await resolveIntent(id, { result: { success: true, txHash: result.txHash } });
@@ -240,6 +270,12 @@ function L1SendIntentModal({
     }
   };
 
+  const vestingOptions: { value: VestingMode; label: string; balance: string; color: string }[] = [
+    { value: 'all',      label: 'All',      balance: balances?.total   ?? '0', color: 'blue' },
+    { value: 'vested',   label: 'Vested',   balance: balances?.vested  ?? '0', color: 'green' },
+    { value: 'unvested', label: 'Unvested', balance: balances?.unvested ?? '0', color: 'orange' },
+  ];
+
   return (
     <BaseModal isOpen={isOpen} onClose={handleClose} size="sm">
       <ModalHeader title="L1 Send Request" onClose={handleClose} />
@@ -247,6 +283,37 @@ function L1SendIntentModal({
         <p className="text-xs text-neutral-500">
           <span className="font-medium text-neutral-700 dark:text-neutral-300">{dappName}</span> requests an L1 transfer
         </p>
+
+        {/* Vesting mode selector */}
+        <div>
+          <label className="text-xs text-neutral-500 mb-1.5 block">Coin type</label>
+          <div className="flex gap-2">
+            {vestingOptions.map((opt) => {
+              const isSelected = vestingMode === opt.value;
+              const colorMap = {
+                blue:   isSelected ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400',
+                green:  isSelected ? 'border-green-500 bg-green-500/10 text-green-600 dark:text-green-400' : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400',
+                orange: isSelected ? 'border-orange-500 bg-orange-500/10 text-orange-600 dark:text-orange-400' : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400',
+              };
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setVestingMode(opt.value)}
+                  className={`flex-1 py-2 px-2 rounded-xl border-2 transition-all bg-neutral-100 dark:bg-neutral-900 hover:border-neutral-300 dark:hover:border-neutral-600 ${colorMap[opt.color as keyof typeof colorMap]}`}
+                >
+                  <div className="text-xs font-semibold">{opt.label}</div>
+                  <div className="text-[10px] font-mono mt-0.5">
+                    {balancesLoading
+                      ? <Loader2 className="w-3 h-3 animate-spin mx-auto" />
+                      : `${formatAlpha(opt.balance)} ALPHA`
+                    }
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <div>
           <label className="text-xs text-neutral-500 mb-1 block">Recipient address</label>
@@ -258,7 +325,14 @@ function L1SendIntentModal({
         </div>
 
         <div>
-          <label className="text-xs text-neutral-500 mb-1 block">Amount (ALPHA)</label>
+          <div className="flex justify-between items-baseline mb-1">
+            <label className="text-xs text-neutral-500">Amount (ALPHA)</label>
+            {balances && (
+              <span className="text-[10px] text-neutral-400">
+                Available: {formatAlpha(vestingOptions.find(o => o.value === vestingMode)?.balance ?? '0')} ALPHA
+              </span>
+            )}
+          </div>
           <input
             type="text"
             inputMode="decimal"
