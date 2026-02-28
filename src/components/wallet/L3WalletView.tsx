@@ -285,7 +285,7 @@ export function L3WalletView({
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <button
             onClick={() => setIsTopUpModalOpen(true)}
-            className="relative px-2 py-2.5 sm:px-3 sm:py-3 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 text-white text-xs sm:text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap hover:scale-[1.02] hover:-translate-y-0.5 active:scale-[0.98] transition-transform"
+            className="relative px-2 py-2.5 sm:px-3 sm:py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-xs sm:text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap hover:scale-[1.02] hover:-translate-y-0.5 active:scale-[0.98] transition-transform"
           >
             <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>Top Up</span>

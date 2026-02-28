@@ -33,12 +33,5 @@
     "typescript": "^5.7.3",
     "vite": "^6.3.5",
     "vite-plugin-node-polyfills": "^0.25.0"
-  },
-  "overrides": {
-    "@unicitylabs/sphere-sdk": {
-      "helia": "-",
-      "@helia/ipns": "-",
-      "@helia/json": "-"
-    }
   }
 }
