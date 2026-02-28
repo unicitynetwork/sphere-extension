@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Loader2, Lock, AlertCircle } from 'lucide-react';
+import { getErrorMessage } from '@/sdk/errors';
 
 interface UnlockWalletProps {
   onUnlock: (password: string) => Promise<void>;
@@ -20,7 +21,7 @@ export function UnlockWallet({ onUnlock }: UnlockWalletProps) {
     try {
       await onUnlock(password);
     } catch (err) {
-      setError((err as Error).message || 'Failed to unlock wallet');
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }

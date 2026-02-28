@@ -11,9 +11,13 @@
  * - Nametag operations
  */
 
-import { Sphere } from '@unicitylabs/sphere-sdk';
+import { Sphere, logger } from '@unicitylabs/sphere-sdk';
 import type { Asset, Token, TransactionHistoryEntry } from '@unicitylabs/sphere-sdk';
 import { createBrowserProviders } from '@unicitylabs/sphere-sdk/impl/browser';
+
+// Expose SDK logger on globalThis for runtime debugging in service worker console.
+// Usage: logger.configure({ debug: true }) or logger.setTagDebug("Nostr", true)
+(globalThis as unknown as Record<string, unknown>).logger = logger;
 
 type BrowserProviders = ReturnType<typeof createBrowserProviders>;
 import type {

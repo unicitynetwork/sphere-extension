@@ -2,6 +2,7 @@ import { Check, Sparkles, Trash2, Loader2, XIcon, ArrowRight, Clock, Receipt, Al
 import { useTransfer } from '@/sdk';
 import { useState } from 'react';
 import { BaseModal, ModalHeader, EmptyState } from '@/components/ui';
+import { getErrorMessage } from '@/sdk/errors';
 
 export enum PaymentRequestStatus {
   PENDING = 'pending',
@@ -56,11 +57,7 @@ export function PaymentRequestsModal({ isOpen, onClose, requests, pendingCount, 
       await transfer({ recipient, amount: req.amount.toString(), coinId: req.coinId });
       paid(req);
     } catch (error: unknown) {
-      let errorMessage = 'Transaction failed';
-      if (error instanceof Error) {
-        errorMessage = error.message.includes('Insufficient') ? 'Insufficient funds' : error.message;
-      }
-      setErrors(prev => ({ ...prev, [req.id]: errorMessage }));
+      setErrors(prev => ({ ...prev, [req.id]: getErrorMessage(error) }));
     } finally {
       setProcessingId(null);
     }

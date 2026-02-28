@@ -9,6 +9,7 @@
  */
 import { useState, useCallback, useEffect } from "react";
 import { useSphereContext } from "@/sdk/context";
+import { getErrorMessage } from "@/sdk/errors";
 
 export type NametagAvailability = "idle" | "checking" | "available" | "taken";
 
@@ -202,7 +203,7 @@ export function useOnboardingFlow() {
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Invalid recovery phrase";
+        const message = getErrorMessage(e);
         setError(message);
         setStep("restore");
       } finally {
@@ -243,7 +244,7 @@ export function useOnboardingFlow() {
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to create wallet";
+        const message = getErrorMessage(e);
         setError(message);
         setStep("passwordSetup");
       } finally {

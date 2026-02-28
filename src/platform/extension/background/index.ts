@@ -8,6 +8,7 @@
  */
 
 import { handleContentMessage, handlePopupMessage } from './message-handler';
+import { getErrorMessage } from '@/sdk/errors';
 import { initConnectHost, destroyConnectHost, isConnectHostActive, openPopupForConnect } from './connect-host';
 import { isExtensionConnectEnvelope, EXT_MSG_TO_HOST } from '@unicitylabs/sphere-sdk/connect/browser';
 
@@ -48,7 +49,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.error('Message handler error:', error);
       sendResponse({
         success: false,
-        error: error.message || 'Unknown error',
+        error: getErrorMessage(error),
       });
     });
 

@@ -9,6 +9,7 @@
  */
 
 import { walletManager } from './wallet-manager';
+import { getErrorMessage } from '@/sdk/errors';
 import {
   initConnectHost,
   destroyConnectHost,
@@ -154,7 +155,7 @@ export async function handleContentMessage(
     return {
       type: `${type}_RESPONSE`,
       success: false,
-      error: (error as Error).message || 'Unknown error',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -449,7 +450,7 @@ export async function handlePopupMessage(
     console.error('Background popup handler error:', error);
     return {
       success: false,
-      error: (error as Error).message || 'Unknown error',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -725,7 +726,7 @@ async function handleSignNostrEventRequest(
     return {
       type: 'SPHERE_SIGN_NOSTR_EVENT_RESPONSE',
       success: false,
-      error: (error as Error).message || 'Failed to sign event',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -766,7 +767,7 @@ async function handleResolveNametag(
     return {
       type: 'SPHERE_RESOLVE_NAMETAG_RESPONSE',
       success: false,
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     };
   }
 }
@@ -807,7 +808,7 @@ async function handleCheckNametagAvailable(
     return {
       type: 'SPHERE_CHECK_NAMETAG_AVAILABLE_RESPONSE',
       success: false,
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     };
   }
 }
@@ -825,7 +826,7 @@ async function handlePopupCheckNametagAvailable(
   } catch (error) {
     return {
       success: false,
-      error: (error as Error).message || 'Failed to check nametag availability',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -860,7 +861,7 @@ async function handlePopupRegisterNametag(
     console.error('[NametagHandler] Registration error:', error);
     return {
       success: false,
-      error: (error as Error).message || 'Failed to register nametag',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -880,7 +881,7 @@ async function handlePopupGetMyNametag(): Promise<{
   } catch (error) {
     return {
       success: false,
-      error: (error as Error).message || 'Failed to get nametag',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -920,7 +921,7 @@ async function handleGetMyNametag(
     return {
       type: 'SPHERE_GET_MY_NAMETAG_RESPONSE',
       success: false,
-      error: (error as Error).message || 'Failed to get nametag',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -936,7 +937,7 @@ async function handlePopupGetAggregatorConfig(): Promise<{
   } catch (error) {
     return {
       success: false,
-      error: (error as Error).message || 'Failed to get aggregator config',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -951,7 +952,7 @@ async function handlePopupSetAggregatorConfig(config: {
   } catch (error) {
     return {
       success: false,
-      error: (error as Error).message || 'Failed to set aggregator config',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -970,7 +971,7 @@ async function handlePopupSendTokens(
   } catch (error) {
     return {
       success: false,
-      error: (error as Error).message || 'Failed to send tokens',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -987,7 +988,7 @@ async function handlePopupResolveNametag(
   } catch (error) {
     return {
       success: false,
-      error: (error as Error).message || 'Failed to resolve nametag',
+      error: getErrorMessage(error),
     };
   }
 }
@@ -1043,10 +1044,10 @@ async function handleApproveTransaction(requestId: string): Promise<{ success: b
       type: 'SPHERE_TRANSACTION_RESULT',
       requestId,
       success: false,
-      error: (error as Error).message,
+      error: getErrorMessage(error),
     });
 
-    return { success: false, error: (error as Error).message };
+    return { success: false, error: getErrorMessage(error) };
   }
 }
 
