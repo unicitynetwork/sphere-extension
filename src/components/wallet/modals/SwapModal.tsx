@@ -3,6 +3,7 @@ import { ArrowDownUp, Loader2, TrendingUp, CheckCircle, ArrowDown } from 'lucide
 import type { Asset } from '@unicitylabs/sphere-sdk';
 import { useIdentity, useAssets, useTransfer } from '@/sdk';
 import { CurrencyUtils } from '@/sdk';
+import { getErrorMessage } from '@/sdk/errors';
 import { BaseModal, ModalHeader, Button } from '@/components/ui';
 
 type Step = 'swap' | 'processing' | 'success';
@@ -85,7 +86,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
       setStep('success');
     } catch (e: unknown) {
       console.error('Swap failed:', e);
-      setError(e instanceof Error ? e.message : 'Swap failed');
+      setError(getErrorMessage(e));
       setStep('swap');
     }
   };

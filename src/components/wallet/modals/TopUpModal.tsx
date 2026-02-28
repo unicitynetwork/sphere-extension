@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, Sparkles, CheckCircle, XCircle } from 'lucide-react';
 import { useIdentity } from '@/sdk';
 import { BaseModal, ModalHeader, Button } from '@/components/ui';
+import { getErrorMessage } from '@/sdk/errors';
 
 const FAUCET_API_URL = 'https://faucet.unicity.network/api/v1/faucet/request';
 
@@ -54,7 +55,7 @@ export function TopUpModal({ isOpen, onClose }: TopUpModalProps) {
             success: false,
             coin,
             amount,
-            message: error instanceof Error ? error.message : 'Unknown error',
+            message: getErrorMessage(error),
           }))
         )
       );
@@ -68,7 +69,7 @@ export function TopUpModal({ isOpen, onClose }: TopUpModalProps) {
         setTimeout(() => setFaucetSuccess(false), 3000);
       }
     } catch (error) {
-      setFaucetError(error instanceof Error ? error.message : 'Failed to request tokens');
+      setFaucetError(getErrorMessage(error));
     } finally {
       setIsFaucetLoading(false);
     }

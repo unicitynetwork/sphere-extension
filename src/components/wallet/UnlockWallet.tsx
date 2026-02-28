@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Loader2, Lock, AlertCircle } from 'lucide-react';
+import { getErrorMessage } from '@/sdk/errors';
 
 interface UnlockWalletProps {
   onUnlock: (password: string) => Promise<void>;
@@ -20,7 +21,7 @@ export function UnlockWallet({ onUnlock }: UnlockWalletProps) {
     try {
       await onUnlock(password);
     } catch (err) {
-      setError((err as Error).message || 'Failed to unlock wallet');
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -36,7 +37,7 @@ export function UnlockWallet({ onUnlock }: UnlockWalletProps) {
         {/* Lock Icon */}
         <div className="relative">
           <div className="absolute inset-0 rounded-2xl blur-lg opacity-50 bg-orange-500" />
-          <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl shadow-orange-500/25">
+          <div className="relative w-16 h-16 rounded-2xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl shadow-orange-500/25">
             <Lock className="w-8 h-8 text-white" />
           </div>
         </div>
@@ -78,7 +79,7 @@ export function UnlockWallet({ onUnlock }: UnlockWalletProps) {
           <button
             type="submit"
             disabled={isLoading || !password.trim()}
-            className="w-full py-3 px-4 bg-gradient-to-r from-orange-500 to-orange-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-orange-500/25 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-[0.98] transition-transform"
+            className="w-full py-3 px-4 bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-orange-500/25 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-[0.98] transition-transform"
           >
             {isLoading ? (
               <span className="flex items-center justify-center gap-2">

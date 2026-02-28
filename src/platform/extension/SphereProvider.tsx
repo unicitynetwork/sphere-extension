@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { TokenRegistry, NETWORKS } from '@unicitylabs/sphere-sdk';
 import { SphereContext, type SphereContextValue } from '@/sdk/context';
 import { SPHERE_KEYS } from '@/sdk/queryKeys';
+import { getErrorMessage } from '@/sdk/errors';
 import type { WalletIdentity } from '@/sdk/types';
 import type { Asset, Token, TransactionHistoryEntry } from '@unicitylabs/sphere-sdk';
 import type { AggregatorConfig, NametagInfo, NametagResolution, PendingTransaction } from '@/shared/types';
@@ -76,7 +77,7 @@ export function ExtensionSphereProvider({ children }: { children: React.ReactNod
           } catch { /* non-fatal — identity loaded without nametag */ }
         }
       } catch (err) {
-        setError((err as Error).message);
+        setError(getErrorMessage(err));
       } finally {
         setIsLoading(false);
       }

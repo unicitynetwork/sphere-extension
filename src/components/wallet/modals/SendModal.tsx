@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowRight, Loader2, User, CheckCircle, Coins, Hash, Copy, Check } from 'lucide-react';
 import type { Asset } from '@unicitylabs/sphere-sdk';
 import { useAssets, useTransfer, useSphereContext, CurrencyUtils } from '@/sdk';
+import { getErrorMessage } from '@/sdk/errors';
 import { BaseModal, ModalHeader, Button } from '@/components/ui';
 
 type Step = 'recipient' | 'asset' | 'amount' | 'confirm' | 'processing' | 'success';
@@ -169,7 +170,7 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
       setStep('success');
     } catch (e: unknown) {
       console.error(e);
-      setRecipientError(e instanceof Error ? e.message : "Transfer failed");
+      setRecipientError(getErrorMessage(e));
       setStep('confirm');
     }
   };

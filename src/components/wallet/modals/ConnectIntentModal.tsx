@@ -15,6 +15,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { MessageSquare, Key, Zap, Loader2 } from 'lucide-react';
 import { ERROR_CODES } from '@unicitylabs/sphere-sdk/connect';
+import { getErrorMessage } from '@/sdk/errors';
 import { BaseModal } from '@/components/ui/BaseModal';
 import { ModalHeader } from '@/components/ui/ModalHeader';
 import { Button } from '@/components/ui/Button';
@@ -264,7 +265,7 @@ function L1SendIntentModal({
       await resolveIntent(id, { result: { success: true, txHash: result.txHash } });
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Send failed');
+      setError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -402,7 +403,7 @@ function DmIntentModal({
       });
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to send DM');
+      setError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -488,7 +489,7 @@ function SignMessageIntentModal({
       await resolveIntent(id, { result: { signature: signResult.signature } });
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Signing failed');
+      setError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }

@@ -10,6 +10,7 @@ import { ArrowRight, Loader2, User, CheckCircle, Hash, Receipt } from 'lucide-re
 import { TokenRegistry, toSmallestUnit } from '@unicitylabs/sphere-sdk';
 import { BaseModal, ModalHeader, Button } from '@/components/ui';
 import { POPUP_MESSAGES } from '@/shared/messages';
+import { getErrorMessage } from '@/sdk/errors';
 
 type Step = 'recipient' | 'coin' | 'amount' | 'confirm' | 'processing' | 'success';
 
@@ -154,7 +155,7 @@ export function SendPaymentRequestModal({ isOpen, onClose, prefill }: SendPaymen
       setRequestId(result.requestId || null);
       setStep('success');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to send payment request');
+      setError(getErrorMessage(e));
       setStep('confirm');
     }
   };

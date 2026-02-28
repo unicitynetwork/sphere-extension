@@ -3,6 +3,7 @@ import { X, Loader2, ArrowRight, Tag, CheckCircle2, AlertCircle } from 'lucide-r
 import { useQueryClient } from '@tanstack/react-query';
 import { useSphereContext } from '@/sdk/context';
 import { SPHERE_KEYS } from '@/sdk/queryKeys';
+import { getErrorMessage } from '@/sdk/errors';
 
 type NametagAvailability = 'idle' | 'checking' | 'available' | 'taken';
 
@@ -93,7 +94,7 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
         setNametagInput('');
       }, 1500);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Registration failed');
+      setError(getErrorMessage(e));
     } finally {
       setIsBusy(false);
     }

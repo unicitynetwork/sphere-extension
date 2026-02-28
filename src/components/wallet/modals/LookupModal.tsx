@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Key, Search, Loader2, Copy, Check } from 'lucide-react';
 import { BaseModal, ModalHeader } from '@/components/ui';
 import { useSphereContext, useIdentity } from '@/sdk';
+import { getErrorMessage } from '@/sdk/errors';
 
 interface ResolvedInfo {
   nametag?: string;
@@ -77,7 +78,7 @@ export function LookupModal({ isOpen, onClose }: LookupModalProps) {
         setResult(info as ResolvedInfo);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lookup failed');
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }

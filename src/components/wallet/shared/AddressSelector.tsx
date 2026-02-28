@@ -24,7 +24,7 @@ export function AddressSelector({ compact = true }: AddressSelectorProps) {
       setCopied('nametag');
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy nametag:', err);
+      console.error('Failed to copy Unicity ID:', err);
     }
   }, [nametag]);
 
