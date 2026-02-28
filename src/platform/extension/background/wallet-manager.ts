@@ -187,12 +187,12 @@ export class WalletManager {
       const hasNametag = (this.sphere as any)._payments?.hasNametag?.() ?? false;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const nametagData = (this.sphere as any)._payments?.getNametag?.();
-      console.log('[WalletManager] Nametag loaded:', hasNametag, nametagData ? `name=${nametagData.name}` : '(none)');
+      console.log('[WalletManager] Unicity ID loaded:', hasNametag, nametagData ? `name=${nametagData.name}` : '(none)');
       if (!hasNametag) {
         console.warn('[WalletManager] WARNING: No nametag token loaded — PROXY transfers will be rejected');
       }
     } catch (e) {
-      console.log('[WalletManager] Could not check nametag state:', e);
+      console.log('[WalletManager] Could not check Unicity ID state:', e);
     }
 
     // Verify nametag binding points to our current transport pubkey
@@ -601,7 +601,7 @@ export class WalletManager {
     try {
       const transport = sphere.getTransport();
       if (!transport.resolveNametag) {
-        console.warn('[WalletManager] Transport does not support nametag resolution');
+        console.warn('[WalletManager] Transport does not support Unicity ID resolution');
         return null;
       }
 
@@ -616,7 +616,7 @@ export class WalletManager {
         proxyAddress: pubkey, // The SDK transport handles routing
       };
     } catch (error) {
-      console.error('[WalletManager] Nametag resolution error:', error);
+      console.error('[WalletManager] Unicity ID resolution error:', error);
       return null;
     }
   }
@@ -638,7 +638,7 @@ export class WalletManager {
         console.log('[WalletManager] isNametagAvailable result for', cleanTag, ':', result);
         return result;
       } catch (error) {
-        console.error('[WalletManager] Nametag availability check error:', error);
+        console.error('[WalletManager] Unicity ID availability check error:', error);
         return false;
       }
     }
@@ -667,10 +667,10 @@ export class WalletManager {
 
       const resolved = await transport.resolveNametag?.(cleanTag);
       const available = !resolved;
-      console.log(`[WalletManager] Standalone nametag check for @${cleanTag}: ${available ? 'available' : 'taken'}`);
+      console.log(`[WalletManager] Standalone Unicity ID check for @${cleanTag}: ${available ? 'available' : 'taken'}`);
       return available;
     } catch (error) {
-      console.error('[WalletManager] Standalone nametag check error:', error);
+      console.error('[WalletManager] Standalone Unicity ID check error:', error);
       return false;
     } finally {
       try { await tempProviders?.transport?.disconnect?.(); } catch { /* ignore */ }
@@ -685,7 +685,7 @@ export class WalletManager {
     // failed on a previous attempt), skip re-registration and just retry the mint.
     const existingNametag = sphere.identity?.nametag;
     if (existingNametag) {
-      console.log(`[WalletManager] Identity already has nametag @${existingNametag}, skipping NOSTR binding`);
+      console.log(`[WalletManager] Identity already has Unicity ID @${existingNametag}, skipping NOSTR binding`);
       if (existingNametag !== cleanTag) {
         throw new Error(`Cannot register @${cleanTag}: address already bound to @${existingNametag}`);
       }
@@ -782,12 +782,12 @@ export class WalletManager {
 
       const resolved: string | null = await transport.resolveNametag(stored.name);
       if (!resolved) {
-        console.warn(`[WalletManager] Nametag @${stored.name} not found on relay`);
+        console.warn(`[WalletManager] Unicity ID @${stored.name} not found on relay`);
         return;
       }
 
       if (resolved === myTransportPubkey) {
-        console.log(`[WalletManager] Nametag @${stored.name} binding OK — matches transport pubkey`);
+        console.log(`[WalletManager] Unicity ID @${stored.name} binding OK — matches transport pubkey`);
         // Binding is fine, but still check if the on-chain token needs re-minting
         await this.ensureNametagTokenMigrated(stored.name);
         return;
@@ -833,7 +833,7 @@ export class WalletManager {
         console.error(`[WalletManager] PROXY transfers will fail until nametag is re-minted`);
       }
     } catch (e) {
-      console.warn('[WalletManager] Nametag binding verification failed:', e);
+      console.warn('[WalletManager] Unicity ID binding verification failed:', e);
     }
   }
 

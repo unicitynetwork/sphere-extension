@@ -23,11 +23,9 @@ export function StartScreen({
   return (
     <div className="relative z-10 w-full max-w-90">
       {/* Icon with glow effect */}
-      <div className="relative w-18 h-18 mx-auto mb-6">
-        <div className="absolute inset-0 bg-linear-to-br from-orange-500 to-orange-600 rounded-2xl blur-xl opacity-45" />
-        <div className="relative w-full h-full rounded-2xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl shadow-orange-500/25">
-          <UnionIcon size={36} />
-        </div>
+      <div className="relative w-20 h-20 mx-auto mb-6 flex items-center justify-center">
+        <div className="absolute inset-0 bg-orange-500 rounded-full blur-2xl opacity-30" />
+        <UnionIcon size={56} className="relative" />
       </div>
 
       <h2 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2 tracking-tight">

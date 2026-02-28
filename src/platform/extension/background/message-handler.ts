@@ -840,7 +840,7 @@ async function handlePopupRegisterNametag(
 
   try {
     const cleanTag = nametag.replace('@', '').trim().toLowerCase();
-    console.log(`[NametagHandler] Registering nametag: @${cleanTag}`);
+    console.log(`[NametagHandler] Registering Unicity ID: @${cleanTag}`);
 
     const result = await nametagMintService.register(cleanTag);
 
@@ -855,7 +855,7 @@ async function handlePopupRegisterNametag(
       status: 'active',
     };
 
-    console.log(`[NametagHandler] Nametag registered: @${cleanTag}`);
+    console.log(`[NametagHandler] Unicity ID registered: @${cleanTag}`);
     return { success: true, nametag: nametagInfo };
   } catch (error) {
     console.error('[NametagHandler] Registration error:', error);

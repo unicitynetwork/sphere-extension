@@ -61,7 +61,7 @@ export function BaseModal({
         <div
           ref={panelRef}
           onClick={(e) => e.stopPropagation()}
-          className={`relative w-full ${sizeClasses[size]} max-h-[70dvh] sm:max-h-[600px] bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl pointer-events-auto flex flex-col overflow-hidden opacity-0 scale-95 translate-y-4 transition-all duration-300 ease-out ${className}`}
+          className={`relative w-full ${sizeClasses[size]} max-h-[70dvh] sm:max-h-150 bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl pointer-events-auto flex flex-col overflow-hidden opacity-0 scale-95 translate-y-4 transition-all duration-300 ease-out ${className}`}
         >
           {/* Background Orbs */}
           {showOrbs && (

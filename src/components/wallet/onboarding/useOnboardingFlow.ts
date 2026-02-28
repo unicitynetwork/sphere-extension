@@ -234,7 +234,7 @@ export function useOnboardingFlow() {
             setProcessingStep(2);
           } catch (e) {
             // Nametag registration failed but wallet was created
-            console.error("Nametag registration failed:", e);
+            console.error("Unicity ID registration failed:", e);
             setProcessingStep(2);
           }
         } else {
